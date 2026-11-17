@@ -49,9 +49,11 @@ export default async function LoginPage({
         }
         utility={<ThemeControl label="Appearance" />}
         footer={
-          <Link className="privacy-footer" href="/privacy">
-            Privacy policy
-          </Link>
+          <footer>
+            <Link className="privacy-footer" href="/privacy">
+              Privacy policy
+            </Link>
+          </footer>
         }
       >
         <AuthCard>
