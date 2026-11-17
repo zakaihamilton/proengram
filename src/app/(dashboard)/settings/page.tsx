@@ -1,0 +1,171 @@
+import Link from "next/link";
+import { Alert, Badge, Card, PageHeader } from "panel-frame-ui";
+import { requireDashboardIdentity } from "@/lib/auth/session";
+import { getMcpResourceUri, getPerministerBaseUrl } from "@/lib/auth/config";
+import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
+import { isDatabaseConfigured } from "@/lib/db/pool";
+import { isGitHubConfigured } from "@/lib/github/github";
+import { syncGitHubAction } from "./actions";
+
+function Status({ ready }: { ready: boolean }) {
+  return <Badge tone={ready ? "success" : "warning"}>{ready ? "Configured" : "Needs setup"}</Badge>;
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ github?: string | string[]; count?: string | string[] }>;
+}) {
+  await requireDashboardIdentity("brain:read");
+  const params = await searchParams;
+  const githubState = Array.isArray(params.github) ? params.github[0] : params.github;
+  const count = Array.isArray(params.count) ? params.count[0] : params.count;
+  const dashboardAuthReady = Boolean(
+    process.env.PERMINISTER_DASHBOARD_CLIENT_ID && process.env.PERMINISTER_DASHBOARD_CLIENT_SECRET,
+  );
+  const mcpAuthReady = Boolean(
+    process.env.PERMINISTER_MCP_CLIENT_ID && process.env.PERMINISTER_MCP_CLIENT_SECRET,
+  );
+  const githubReady = isGitHubConfigured();
+  const databaseReady = isDatabaseConfigured();
+  const mcpUrl = getMcpResourceUri();
+
+  return (
+    <main className="page-content">
+      <PageHeader
+        eyebrow="WORKSPACE CONFIGURATION"
+        title="Settings"
+        description="Connection status and setup guidance. Secrets are never displayed in the dashboard."
+      />
+      {githubState === "synced" ? (
+        <Alert tone="success">Synced {count || "the"} Markdown files from GitHub.</Alert>
+      ) : null}
+      {githubState === "error" ? (
+        <Alert tone="error">
+          GitHub sync failed. Check the App installation, repository permissions, and Nanogres
+          database.
+        </Alert>
+      ) : null}
+
+      <div className="connection-grid">
+        <Card className="connection-card">
+          <Status ready={dashboardAuthReady} />
+          <h2>Perminister dashboard client</h2>
+          <p>
+            OIDC sign-in for the ProEngram dashboard. Configure this as a standard app client with
+            the exact callback URL.
+          </p>
+          <p className="connection-status">
+            <code>
+              {new URL(
+                "/auth/perminister/callback",
+                process.env.PROENGRAM_ORIGIN || "http://localhost:3000",
+              ).toString()}
+            </code>
+          </p>
+        </Card>
+        <Card className="connection-card">
+          <Status ready={mcpAuthReady} />
+          <h2>Perminister MCP resource client</h2>
+          <p>
+            Confidential server credentials validate remote user tokens and current grants.
+            Configure the resource URI and matching scopes.
+          </p>
+          <p className="connection-status">
+            <code>{mcpUrl}</code>
+          </p>
+        </Card>
+        <Card className="connection-card">
+          <Status ready={databaseReady} />
+          <h2>Nanogres PostgreSQL</h2>
+          <p>
+            ProEngram uses a dedicated database and least-privilege role through Nanogres TLS
+            PgBouncer. The connection is server-only.
+          </p>
+          <p className="connection-status">
+            {databaseReady ? "Connection string present" : "Set DATABASE_URL"}
+          </p>
+        </Card>
+        <Card className="connection-card">
+          <Status ready={githubReady} />
+          <h2>GitHub Markdown</h2>
+          <p>
+            Company Markdown is the canonical source. A GitHub App reads docs and opens reviewable
+            pull requests.
+          </p>
+          <p className="connection-status">
+            {githubReady
+              ? `${process.env.GITHUB_REPO_OWNER}/${process.env.GITHUB_REPO_NAME}`
+              : "Install/configure a GitHub App"}
+          </p>
+          <form action={syncGitHubAction} className="connection-action">
+            <button
+              className="pf-button pf-button-secondary"
+              disabled={!githubReady || !databaseReady}
+              type="submit"
+            >
+              Sync Markdown
+            </button>
+          </form>
+        </Card>
+        <Card className="connection-card">
+          <Badge tone="warning">Adapter required</Badge>
+          <h2>Sentry8 policy snapshots</h2>
+          <p>
+            Import a reviewed policy catalog from a supported Sentry8 export or identity-safe
+            adapter. Direct MCP calls are not enforced by Sentry8 yet.
+          </p>
+          <p className="connection-status">
+            <Link className="text-link" href="/policies">
+              Open policy library →
+            </Link>
+          </p>
+        </Card>
+        <Card className="connection-card">
+          <Badge tone="accent">Remote MCP</Badge>
+          <h2>Connect an assistant</h2>
+          <p>
+            Use the ProEngram MCP URL. ChatGPT and Claude each run a separate Perminister user
+            consent flow.
+          </p>
+          <p className="connection-status">
+            <code>{mcpUrl}</code>
+          </p>
+          <p className="metric-note">Discovery: {protectedResourceMetadataUrl()}</p>
+        </Card>
+      </div>
+
+      <Card className="content-card setup-card">
+        <div className="card-heading">
+          <div>
+            <h2>Initial setup</h2>
+            <p>
+              Keep each secret in the hosting environment and each database credential on the
+              server.
+            </p>
+          </div>
+        </div>
+        <ol className="setup-list">
+          <li>
+            Create a dedicated <code>proengram</code> database and application/migration roles in
+            Nanogres, then set <code>DATABASE_URL</code> and <code>MIGRATION_DATABASE_URL</code>.
+          </li>
+          <li>
+            Configure separate Perminister clients for dashboard OIDC and MCP resource
+            introspection.
+          </li>
+          <li>Set the GitHub App permissions for repository contents and pull requests.</li>
+          <li>
+            Apply <code>db/migrations/001_initial.sql</code> with <code>pnpm db:migrate</code>.
+          </li>
+          <li>
+            Run <code>pnpm health:audit</code> and review the available Repnix guardrails.
+          </li>
+        </ol>
+        <p className="metric-note">
+          Perminister: <code>{getPerministerBaseUrl()}</code>
+        </p>
+      </Card>
+    </main>
+  );
+}
