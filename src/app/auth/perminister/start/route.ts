@@ -6,8 +6,9 @@ import { createRandomToken, createPkceChallenge, encodeOAuthState } from "@/lib/
 
 export const runtime = "nodejs";
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
+    const requestUrl = new URL(request.url);
     const [metadata, client] = await Promise.all([
       getOpenIdConfiguration(),
       Promise.resolve(getPerministerClient("dashboard")),
@@ -20,6 +21,9 @@ export async function GET(): Promise<Response> {
     authorizationUrl.searchParams.set("redirect_uri", getDashboardRedirectUri());
     authorizationUrl.searchParams.set("response_type", "code");
     authorizationUrl.searchParams.set("scope", "openid profile email perminister_api");
+    if (requestUrl.searchParams.get("prompt") === "login") {
+      authorizationUrl.searchParams.set("prompt", "login");
+    }
     authorizationUrl.searchParams.set("state", state);
     authorizationUrl.searchParams.set("nonce", nonce);
     authorizationUrl.searchParams.set("code_challenge", createPkceChallenge(verifier));

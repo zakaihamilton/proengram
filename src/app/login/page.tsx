@@ -1,4 +1,5 @@
-import { AuthCard, AuthShell, Button, ThemeControl } from "panel-frame-ui";
+import Link from "next/link";
+import { AuthCard, AuthShell, ThemeControl } from "panel-frame-ui";
 import { BrandMark } from "@/components/brand";
 import { getDashboardIdentity } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -22,6 +23,7 @@ export default async function LoginPage({
   const params = await searchParams;
   const errorKey = Array.isArray(params.error) ? params.error[0] : params.error;
   const error = errorKey ? errorCopy[errorKey] || "Sign-in was not completed." : null;
+  if (!error) redirect("/auth/perminister/start");
 
   return (
     <main className="access-page">
@@ -50,18 +52,17 @@ export default async function LoginPage({
       >
         <AuthCard>
           <p className="eyebrow">WELCOME</p>
-          <h2>Sign in to ProEngram</h2>
+          <h2>Continue with Perminister</h2>
           <p className="pf-page-description">Use your company Perminister account to continue.</p>
-          {error ? (
-            <p className="login-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <form action="/auth/perminister/start" method="get">
-            <Button type="submit" variant="primary">
-              Continue with Perminister
-            </Button>
-          </form>
+          <p className="login-error" role="alert">
+            {error}
+          </p>
+          <Link
+            className="pf-button pf-button-primary login-retry"
+            href="/auth/perminister/start?prompt=login"
+          >
+            Try again with Perminister
+          </Link>
           <p className="login-note">
             Your ChatGPT or Claude subscription remains separate. ProEngram only provides shared
             company context and tools.
