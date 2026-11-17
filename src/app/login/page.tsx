@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AuthCard, AuthShell, Button, ThemeControl } from "panel-frame-ui";
 import { BrandMark } from "@/components/brand";
 import { getDashboardIdentity } from "@/lib/auth/session";
@@ -47,6 +48,11 @@ export default async function LoginPage({
           </div>
         }
         utility={<ThemeControl label="Appearance" />}
+        footer={
+          <Link className="privacy-footer" href="/privacy">
+            Privacy policy
+          </Link>
+        }
       >
         <AuthCard>
           <p className="eyebrow">WELCOME</p>
