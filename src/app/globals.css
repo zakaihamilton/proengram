@@ -219,6 +219,12 @@ select:focus-visible {
 .privacy-footer:hover {
   color: var(--accent);
 }
+@media (max-width: 780px) {
+  .access-page .pf-auth-aside-footer {
+    display: block;
+    margin-top: 12px;
+  }
+}
 .page-content {
   width: min(100%, 1320px);
   margin: 0 auto;

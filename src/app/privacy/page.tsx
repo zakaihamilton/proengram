@@ -39,10 +39,10 @@ export default function PrivacyPage() {
             </p>
             <p>
               The service keeps activity records for actions such as knowledge searches, saved
-              answers, source synchronization, and proposed GitHub changes. A search activity
-              record identifies the actor and action and may include a result count; the search
-              text itself is used to find matching items. Tool inputs are processed to complete the
-              requested operation.
+              answers, source synchronization, and proposed GitHub changes. A search activity record
+              identifies the actor and action and may include a result count; the search text itself
+              is used to find matching items. Tool inputs are processed to complete the requested
+              operation.
             </p>
           </section>
 
@@ -51,9 +51,9 @@ export default function PrivacyPage() {
             <p>
               Information is used to search shared knowledge, return company-approved policy
               context, save answers, sync repository documents, and propose edits as GitHub pull
-              requests. ProEngram stores the knowledge index, saved material, policies, and
-              activity in a Nanogres-managed PostgreSQL database. GitHub remains the source for
-              editable Markdown documents.
+              requests. ProEngram stores the knowledge index, saved material, policies, and activity
+              in a Nanogres-managed PostgreSQL database. GitHub remains the source for editable
+              Markdown documents.
             </p>
             <p>
               Vercel hosts the dashboard and service endpoints. Perminister handles identity and
@@ -64,28 +64,28 @@ export default function PrivacyPage() {
             </p>
             <p>
               Access to workspace information is controlled by organization permissions. A saved
-              answer is shared with the company workspace, and a proposed repository edit is
-              visible to people who can access the corresponding GitHub pull request.
+              answer is shared with the company workspace, and a proposed repository edit is visible
+              to people who can access the corresponding GitHub pull request.
             </p>
           </section>
 
           <section>
             <h2>Cookies and browser storage</h2>
             <p>
-              The dashboard uses an HTTP-only session cookie to keep a signed-in session and
-              browser local storage to remember your appearance preference. The service also
-              receives ordinary connection details when your browser or assistant makes a request.
+              The dashboard uses an HTTP-only session cookie to keep a signed-in session and browser
+              local storage to remember your appearance preference. The service also receives
+              ordinary connection details when your browser or assistant makes a request.
             </p>
           </section>
 
           <section>
             <h2>Retention and control</h2>
             <p>
-              Indexed documents, saved answers, policy snapshots, and workspace activity are kept
-              to provide the service and its history. ProEngram does not set a single fixed
-              deletion period for all workspace records. Organization administrators manage the
-              connected repository and workspace membership; contact the service operator for a
-              request about information stored by ProEngram.
+              Indexed documents, saved answers, policy snapshots, and workspace activity are kept to
+              provide the service and its history. ProEngram does not set a single fixed deletion
+              period for all workspace records. Organization administrators manage the connected
+              repository and workspace membership; contact the service operator for a request about
+              information stored by ProEngram.
             </p>
           </section>
 
@@ -93,9 +93,10 @@ export default function PrivacyPage() {
             <h2>Requests and contact</h2>
             <p>
               For a privacy question or request, contact Zakai Hamilton using the contact
-              information on the <a href="https://www.perminister.com/privacy">Perminister privacy
-              page</a>. If your information comes from a company workspace, your organization
-              administrator can also help direct the request.
+              information on the{" "}
+              <a href="https://www.perminister.com/privacy">Perminister privacy page</a>. If your
+              information comes from a company workspace, your organization administrator can also
+              help direct the request.
             </p>
           </section>
 
