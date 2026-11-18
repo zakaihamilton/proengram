@@ -189,8 +189,17 @@ const credentialResponse = await fetch(identityUrl, {
   signal: AbortSignal.timeout(15_000),
 });
 if (!credentialResponse.ok) {
+  const responseError = await credentialResponse.json().catch(() => null);
+  const providerMessage =
+    responseError && typeof responseError.error === "string"
+      ? ": " + responseError.error.slice(0, 256)
+      : "";
   throw new Error(
-    "Nanogres migration identity exchange failed (" + credentialResponse.status + ").",
+    "Nanogres migration identity exchange failed (" +
+      credentialResponse.status +
+      ")" +
+      providerMessage +
+      ".",
   );
 }
 const credential = await credentialResponse.json();
