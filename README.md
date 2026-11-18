@@ -20,12 +20,16 @@ ProEngram is a company knowledge dashboard and remote MCP server. Each employee 
 
 ## Perminister setup
 
-Create two separate confidential ProEngram app clients in Perminister:
+Create a separate dashboard and MCP client pair for each environment. The MCP client is bound to one canonical resource URI, so do not reuse its credentials between local development and production.
 
-1. **Dashboard OIDC client:** register `http://localhost:3000/auth/perminister/callback` as the callback URL (replace the origin in production). Enable the `openid`, `profile`, `email`, and `perminister_api` scopes. Give the app client the dashboard access needed for sign-in and `POST /api/authorize` checks.
-2. **MCP resource client:** configure the exact canonical resource URI from `PERMINISTER_MCP_RESOURCE_URI` (locally `http://localhost:3000/mcp`) and the scopes `brain:read`, `policy:read`, `result:save`, and `knowledge:propose`. Use its confidential credentials for token introspection and live action checks. Remote assistant clients register separately with Perminister through OAuth discovery.
+| Environment | Dashboard origin and callback | MCP resource URI |
+| --- | --- | --- |
+| Local | `http://localhost:3000` and `http://localhost:3000/auth/perminister/callback` | `http://localhost:3000/mcp` |
+| Production | `https://proengram.vercel.app` and `https://proengram.vercel.app/auth/perminister/callback` | `https://proengram.vercel.app/mcp` |
 
-Set `PERMINISTER_ORGANIZATION_ID` to the lowercase organization identifier used by this deployment, and set `PERMINISTER_ISSUER` to the issuer returned by Perminister metadata. Keep both client secrets and the OAuth state signing secret in the hosting environment. Use an HTTPS origin, a dedicated cookie secret of at least 32 characters, and an HTTPS resource URI in production.
+For each dashboard client, enable `openid`, `profile`, `email`, and `perminister_api`. For each MCP client, register only that environment's resource URI and the scopes `brain:read`, `policy:read`, `result:save`, and `knowledge:propose`. Keep registration invite-only. Remote assistant clients register separately with Perminister through OAuth discovery.
+
+Copy `.env.example` to `.env.local` and enter the local client IDs and secrets there. In Vercel, set the matching production values in the `proengram` project's Production environment. Set `PROENGRAM_ORIGIN` and `PERMINISTER_MCP_RESOURCE_URI` to the corresponding row above, and set `PERMINISTER_ORGANIZATION_ID` to the lowercase organization identifier used by this deployment. Set `PERMINISTER_ISSUER` to the issuer returned by Perminister metadata. Keep client secrets server-only, and set `PROENGRAM_COOKIE_SECRET` to a dedicated random value of at least 32 characters in each environment. Production origins and the MCP resource URI must use HTTPS.
 
 The MCP endpoint is `/mcp`. Protected Resource Metadata is published at the RFC 9728 path for that exact resource URL (for example, `/.well-known/oauth-protected-resource/mcp`). ChatGPT and Claude discover Perminister there and obtain a separate user token for the ProEngram resource.
 
