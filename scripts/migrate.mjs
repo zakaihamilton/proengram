@@ -294,7 +294,8 @@ if (
   throw new Error("Nanogres returned invalid migration SSH credentials.");
 }
 
-const sshPrivateKey = opensshPrivateKeyFromKeyPair(keyPair.privateKey, keyPair.publicKey);\nconst tunnel = await openWorkloadTunnel(credential, sshPrivateKey);
+const sshPrivateKey = opensshPrivateKeyFromKeyPair(keyPair.privateKey, keyPair.publicKey);
+const tunnel = await openWorkloadTunnel(credential, sshPrivateKey);
 const pool = new pg.Pool({
   host: "127.0.0.1",
   port: tunnel.port,
