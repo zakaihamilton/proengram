@@ -118,7 +118,7 @@ function safeMarkdownPath(path: string): boolean {
 }
 
 export async function syncGitHubMarkdown(organizationId: string, subjectId: string) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
   const settings = getSettings();
   const syncId = randomUUID();
@@ -254,7 +254,7 @@ export async function createMarkdownPullRequest(input: {
     throw new Error("Only Markdown files inside docs/ can be proposed.");
   if (Buffer.byteLength(input.markdown, "utf8") > MAX_MARKDOWN_BYTES)
     throw new Error("The proposed Markdown exceeds 300 KB.");
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is required to audit GitHub proposals.");
   const activityId = randomUUID();
   await pool.query(

@@ -53,7 +53,7 @@ async function canAuthorizeMcpAction(principal: McpPrincipal, action: string): P
 }
 
 function requireDatabase(): void {
-  if (!isDatabaseConfigured() || !getPool())
+  if (!isDatabaseConfigured())
     throw new Error("Nanogres PostgreSQL is not configured.");
 }
 
@@ -88,7 +88,7 @@ function createServer(principal: McpPrincipal): McpServer {
           limit ?? 8,
           canReadPolicies ? undefined : "sentry8_policy",
         );
-        const pool = getPool();
+        const pool = await getPool();
         if (pool) {
           await pool.query(
             `INSERT INTO activity_events (id, organization_id, actor_subject_id, action, summary, metadata)

@@ -63,7 +63,7 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
     redirect("/policies?import=invalid");
   }
   if (!catalog) redirect("/policies?import=invalid");
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) redirect("/policies?import=storage");
   const client = await pool.connect();
   try {

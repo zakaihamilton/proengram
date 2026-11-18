@@ -14,7 +14,7 @@ ProEngram is a company knowledge dashboard and remote MCP server. Each employee 
 
 1. Install Node.js 24.22.1 or newer in the 24.x line, plus pnpm 12.18 or newer.
 2. Copy `.env.example` to `.env.local` and fill in the settings below.
-3. Create a dedicated ProEngram database and least-privilege runtime and migration roles in Nanogres. Put the runtime TLS connection string in `DATABASE_URL` and the migration-role connection string in `MIGRATION_DATABASE_URL`.
+3. Create a dedicated ProEngram database and least-privilege runtime and migration roles in Nanogres. Configure the Nanogres organization, database, and role names; grant this Vercel project's exact development OIDC identity. `vercel env pull .env.local` supplies a short-lived local OIDC token.
 4. Install dependencies with `pnpm install`, apply the schema with `pnpm db:migrate`, then run `pnpm dev`. The migration command reads `.env.local` automatically.
 5. Open `http://localhost:3000`. Use `/ui-preview` for the synthetic component gallery.
 
@@ -39,7 +39,7 @@ Install a GitHub App on the one company knowledge repository. Grant repository C
 
 ## Database and migrations
 
-`DATABASE_URL` and `MIGRATION_DATABASE_URL` are server-only. Apply schema changes with `pnpm db:migrate`; the migration runner uses a PostgreSQL advisory lock. For hosted deployments, run migrations from a controlled release step with the migration role, then run the app with the narrower runtime role.
+ProEngram exchanges Vercel OIDC tokens for 15-minute Nanogres client certificates. Set `NANOGRES_ORGANIZATION_ID`, `NANOGRES_DATABASE`, `NANOGRES_RUNTIME_ROLE`, `NANOGRES_MIGRATION_ROLE`, and `NANOGRES_MIGRATION_OWNER_ROLE` in each environment. Add exact-match issuer, audience, and subject grants for development, preview, and production in Nanogres; keep each environment on its own scoped roles. Runtime connections use transaction pooling. Migrations use session pooling and assume the configured owner role before taking an advisory lock. The app never stores a PostgreSQL password or connection URL. Apply schema changes with `pnpm db:migrate`.
 
 ## Sentry8 policy snapshots
 

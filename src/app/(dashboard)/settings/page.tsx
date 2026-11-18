@@ -79,11 +79,11 @@ export default async function SettingsPage({
           <Status ready={databaseReady} />
           <h2>Nanogres PostgreSQL</h2>
           <p>
-            ProEngram uses a dedicated database and least-privilege role through Nanogres TLS
-            PgBouncer. The connection is server-only.
+            ProEngram uses a dedicated database and least-privilege roles through short-lived
+            Nanogres workload certificates. The connection stays server-side.
           </p>
           <p className="connection-status">
-            {databaseReady ? "Connection string present" : "Set DATABASE_URL"}
+            {databaseReady ? "Workload identity configured" : "Set Nanogres identity settings"}
           </p>
         </Card>
         <Card className="connection-card">
@@ -140,15 +140,15 @@ export default async function SettingsPage({
           <div>
             <h2>Initial setup</h2>
             <p>
-              Keep each secret in the hosting environment and each database credential on the
-              server.
+              Keep application secrets server-side; database access uses short-lived workload
+              certificates.
             </p>
           </div>
         </div>
         <ol className="setup-list">
           <li>
-            Create a dedicated <code>proengram</code> database and application/migration roles in
-            Nanogres, then set <code>DATABASE_URL</code> and <code>MIGRATION_DATABASE_URL</code>.
+            Create a dedicated <code>proengram</code> database and runtime/migration roles in
+            Nanogres, then grant this environment's exact Vercel OIDC identity.
           </li>
           <li>
             Configure separate Perminister clients for dashboard OIDC and MCP resource

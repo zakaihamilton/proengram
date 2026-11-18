@@ -1,16 +1,17 @@
-import { getPool } from "@/lib/db/pool";
+import { getPool, isDatabaseConfigured } from "@/lib/db/pool";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<Response> {
-  const pool = getPool();
-  if (!pool)
+  if (!isDatabaseConfigured())
     return Response.json(
       { status: "setup_required" },
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   try {
+    const pool = await getPool();
+    if (!pool) throw new Error("Nanogres workload identity is not configured.");
     await pool.query("SELECT 1");
     return Response.json({ status: "ok" }, { headers: { "Cache-Control": "no-store" } });
   } catch {
