@@ -1,10 +1,74 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createPrivateKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 import { resolve } from "node:path";
 import pg from "pg";
 import { Client as SshClient } from "ssh2";
 import WebSocket, { createWebSocketStream } from "ws";
+
+function sshUint32(value) {
+  const result = Buffer.alloc(4);
+  result.writeUInt32BE(value >>> 0);
+  return result;
+}
+
+function sshString(value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+  return Buffer.concat([sshUint32(bytes.length), bytes]);
+}
+
+function opensshPrivateKeyFromKeyPair(privateKeyPem, publicKeyDer) {
+  const publicPrefix = Buffer.from("302a300506032b6570032100", "hex");
+  const privatePrefix = Buffer.from("302e020100300506032b657004220420", "hex");
+  if (
+    !Buffer.isBuffer(publicKeyDer) ||
+    publicKeyDer.length !== publicPrefix.length + 32 ||
+    !publicKeyDer.subarray(0, publicPrefix.length).equals(publicPrefix)
+  ) {
+    throw new Error("The generated SSH public key was not Ed25519.");
+  }
+  const privateKeyDer = Buffer.from(
+    createPrivateKey(privateKeyPem).export({ format: "der", type: "pkcs8" }),
+  );
+  if (
+    privateKeyDer.length !== privatePrefix.length + 32 ||
+    !privateKeyDer.subarray(0, privatePrefix.length).equals(privatePrefix)
+  ) {
+    throw new Error("The generated SSH private key was not Ed25519.");
+  }
+
+  const publicKey = publicKeyDer.subarray(publicPrefix.length);
+  const privateKey = Buffer.concat([privateKeyDer.subarray(privatePrefix.length), publicKey]);
+  const check = randomBytes(4).readUInt32BE(0);
+  const privatePayload = Buffer.concat([
+    sshUint32(check),
+    sshUint32(check),
+    sshString("ssh-ed25519"),
+    sshString(publicKey),
+    sshString(privateKey),
+    sshString("nanogres-workload"),
+  ]);
+  const paddingLength = 8 - (privatePayload.length % 8);
+  const padding = Buffer.from(Array.from({ length: paddingLength }, (_, index) => index + 1));
+  const publicBlob = Buffer.concat([sshString("ssh-ed25519"), sshString(publicKey)]);
+  const opensshKey = Buffer.concat([
+    Buffer.from("openssh-key-v1\\0", "ascii"),
+    sshString("none"),
+    sshString("none"),
+    sshString(Buffer.alloc(0)),
+    sshUint32(1),
+    sshString(publicBlob),
+    sshString(Buffer.concat([privatePayload, padding])),
+  ]);
+  const encoded = opensshKey.toString("base64").match(/.{1,70}/g)?.join("\\n");
+  if (!encoded) throw new Error("The generated SSH private key could not be encoded.");
+  return (
+    "-----BEGIN OPENSSH PRIVATE KEY-----\\n" +
+    encoded +
+    "\\n-----END OPENSSH PRIVATE KEY-----\\n"
+  );
+}
+
 
 const organizationId = process.env.NANOGRES_ORGANIZATION_ID?.trim();
 const database = process.env.NANOGRES_DATABASE?.trim();
@@ -230,7 +294,7 @@ if (
   throw new Error("Nanogres returned invalid migration SSH credentials.");
 }
 
-const tunnel = await openWorkloadTunnel(credential, keyPair.privateKey);
+const sshPrivateKey = opensshPrivateKeyFromKeyPair(keyPair.privateKey, keyPair.publicKey);\nconst tunnel = await openWorkloadTunnel(credential, sshPrivateKey);
 const pool = new pg.Pool({
   host: "127.0.0.1",
   port: tunnel.port,
