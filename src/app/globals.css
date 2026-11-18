@@ -211,6 +211,21 @@ select:focus-visible {
   color: var(--ink);
   background: var(--surface-soft);
 }
+.privacy-footer {
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.privacy-footer:hover {
+  color: var(--accent);
+}
+@media (max-width: 780px) {
+  .access-page .pf-auth-aside-footer {
+    display: block;
+    margin-top: 12px;
+  }
+}
 .page-content {
   width: min(100%, 1320px);
   margin: 0 auto;
