@@ -50,8 +50,8 @@ function requiredSetting(name: string): string {
 
 export function getGitHubOAuthConfiguration(): GitHubOAuthConfiguration {
   return {
-    clientId: requiredSetting("GITHUB_APP_CLIENT_ID"),
-    clientSecret: requiredSetting("GITHUB_APP_CLIENT_SECRET"),
+    clientId: requiredSetting("GITHUB_OAUTH_CLIENT_ID"),
+    clientSecret: requiredSetting("GITHUB_OAUTH_CLIENT_SECRET"),
     redirectUri: new URL("/auth/github/callback", getPublicOrigin()).toString(),
   };
 }
@@ -66,7 +66,7 @@ export async function createGitHubAuthorizationUrl(input: {
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", input.state);
-  url.searchParams.set("scope", "offline_access");
+  url.searchParams.set("scope", "repo offline_access");
   url.searchParams.set("code_challenge", input.codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
   url.searchParams.set("prompt", "select_account");

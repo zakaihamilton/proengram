@@ -37,16 +37,16 @@ The dashboard stores its active organization in a browser cookie. MCP calls are 
 
 ## GitHub setup
 
-Create a GitHub App with the OAuth user authorization flow enabled, an expiring user token, and this callback URL for each environment:
+Create a GitHub OAuth App with this callback URL for each environment:
 
-| Environment | GitHub App callback |
+| Environment | GitHub OAuth App callback |
 | --- | --- |
 | Local | `http://localhost:3000/auth/github/callback` |
 | Production | `https://proengram.vercel.app/auth/github/callback` |
 
-Grant the App Contents read/write and Pull requests read/write repository permissions, and install it on the repositories ProEngram should use. Configure `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and `GITHUB_TOKEN_ENCRYPTION_KEY` in each environment. The encryption key must be 32 random bytes encoded as hex or base64; keep it separate per environment and retain it while encrypted tokens exist. ProEngram encrypts user access and refresh tokens in Nanogres and refreshes them server-side. It does not need a GitHub App private key.
+Configure `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and `GITHUB_TOKEN_ENCRYPTION_KEY` in each environment. The encryption key must be 32 random bytes encoded as hex or base64; keep it separate per environment and retain it while encrypted tokens exist. ProEngram encrypts user access and refresh tokens in Nanogres and refreshes them server-side. GitHub OAuth asks each administrator to authorize `repo` access and expiring tokens; it does not require app installation or pre-registration of repositories. GitHub's `repo` scope grants the app read/write access to all public and private repositories the authorizing user can access. Admins then choose which of those repositories ProEngram will connect and index.
 
-An organization admin connects one or more GitHub user accounts in that organization's Settings page, then adds repositories those accounts can access. Accounts and repositories are scoped to the ProEngram organization; admins can remove either at any time. The account must have access to the GitHub App installation and selected repository. ProEngram checks repository access before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. `propose_markdown_change` creates reviewable pull requests under `docs/` in the selected repository and never merges them automatically.
+An organization admin connects one or more GitHub user accounts in that organization's Settings page, then chooses from repositories dynamically discovered for those accounts. Accounts and repositories are scoped to the ProEngram organization; admins can remove either at any time. ProEngram checks repository access before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. `propose_markdown_change` creates reviewable pull requests under `docs/` in the selected repository and never merges them automatically.
 
 For an existing deployment, migration 003 carries any repository already stored in `github_repository_settings` into the new source table as needing authorization. An admin reconnects a GitHub account and selects the repository in Settings before it can sync again.
 

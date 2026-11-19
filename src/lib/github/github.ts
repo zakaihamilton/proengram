@@ -17,6 +17,13 @@ const MARKDOWN_FETCH_BATCH_SIZE = 8;
 type GitHubTreeEntry = { path?: string; type?: string; sha?: string; url?: string; size?: number };
 type GitHubBlob = { encoding?: string; content?: string; size?: number };
 
+export type GitHubAccessibleRepository = {
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+};
+
 type GitHubRepositorySourceRow = {
   id: string;
   organization_id: string;
@@ -126,6 +133,52 @@ export async function listGitHubRepositorySources(
     [organizationId],
   );
   return result.rows.map(mapSource);
+}
+
+export async function listGitHubAccountRepositories(
+  organizationId: string,
+  organizationAccountId: string,
+): Promise<GitHubAccessibleRepository[]> {
+  const token = await getGitHubAccessToken(organizationId, organizationAccountId);
+  const repositories: GitHubAccessibleRepository[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const url = new URL(`${API_ROOT}/user/repos`);
+    url.searchParams.set("affiliation", "owner,collaborator,organization_member");
+    url.searchParams.set("per_page", "100");
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("sort", "updated");
+    url.searchParams.set("direction", "desc");
+    const batch = await githubJson<
+      Array<{
+        id?: number | string;
+        full_name?: string;
+        default_branch?: string;
+        private?: boolean;
+      }>
+    >(url.toString(), token);
+
+    for (const repository of batch) {
+      if (
+        repository.id === undefined ||
+        !repository.full_name ||
+        !repository.default_branch ||
+        !/^[^/]+\/[^/]+$/.test(repository.full_name)
+      ) {
+        continue;
+      }
+      repositories.push({
+        id: String(repository.id),
+        fullName: repository.full_name,
+        defaultBranch: repository.default_branch,
+        isPrivate: repository.private === true,
+      });
+    }
+
+    if (batch.length < 100) break;
+  }
+
+  return repositories.sort((left, right) => left.fullName.localeCompare(right.fullName));
 }
 
 async function getRepositorySource(

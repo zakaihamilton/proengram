@@ -4,7 +4,11 @@ import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session
 import { getMcpResourceUri, getPerministerBaseUrl, getPublicOrigin } from "@/lib/auth/config";
 import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
 import { isDatabaseConfigured } from "@/lib/db/pool";
-import { isGitHubConfigured, listGitHubRepositorySources } from "@/lib/github/github";
+import {
+  isGitHubConfigured,
+  listGitHubAccountRepositories,
+  listGitHubRepositorySources,
+} from "@/lib/github/github";
 import { listGitHubAccountConnections } from "@/lib/github/connections";
 import {
   addGitHubRepositoryAction,
@@ -45,6 +49,35 @@ export default async function SettingsPage({
     ? await listGitHubRepositorySources(identity.organization.organizationId).catch(() => [])
     : [];
   const activeSources = githubSources.filter((source) => source.status === "active");
+  const connectedRepositories = new Set(
+    activeSources.map((source) => `${source.owner}/${source.repository}`.toLowerCase()),
+  );
+  const repositoryChoices = new Map<
+    string,
+    { repositories: Awaited<ReturnType<typeof listGitHubAccountRepositories>>; error: boolean }
+  >();
+  if (canManageSources && githubOAuthReady && databaseReady) {
+    const choices = await Promise.all(
+      githubAccounts.map(async (account) => {
+        if (account.status !== "active") {
+          return { accountId: account.id, repositories: [], error: false };
+        }
+        try {
+          return {
+            accountId: account.id,
+            repositories: await listGitHubAccountRepositories(
+              identity.organization.organizationId,
+              account.id,
+            ),
+            error: false,
+          };
+        } catch {
+          return { accountId: account.id, repositories: [], error: true };
+        }
+      }),
+    );
+    for (const choice of choices) repositoryChoices.set(choice.accountId, choice);
+  }
   const connected = githubOAuthReady && activeSources.length > 0;
   const mcpUrl = getMcpResourceUri();
   const githubState = first(params.github);
@@ -77,7 +110,7 @@ export default async function SettingsPage({
       ) : null}
       {githubConnectionState === "setup" || githubConnectionState === "error" ? (
         <Alert tone="error">
-          GitHub OAuth is not ready. Configure the GitHub App client ID and secret plus the token
+          GitHub OAuth is not ready. Configure the OAuth client ID and secret plus the token
           encryption key, then try again.
         </Alert>
       ) : null}
@@ -91,7 +124,7 @@ export default async function SettingsPage({
       ) : null}
       {githubRepositoryState === "error" ? (
         <Alert tone="error">
-          Repository could not be changed. Check the account's access and repository name.
+          Repository could not be added. Check the selected account's repository access.
         </Alert>
       ) : null}
       {githubAccountState === "removed" ? (
@@ -145,10 +178,14 @@ export default async function SettingsPage({
             Connect GitHub user accounts, then choose repositories the account can access. Each
             organization keeps its own account and repository connections.
           </p>
+          <p className="metric-note">
+            GitHub grants this connection read/write access to repositories the user can access;
+            ProEngram only indexes repositories admins select here.
+          </p>
           <p className="connection-status">
             {githubOAuthReady
               ? `${githubAccounts.length} account${githubAccounts.length === 1 ? "" : "s"} · ${activeSources.length} active ${activeSources.length === 1 ? "repository" : "repositories"}`
-              : "Set the GitHub App OAuth credentials and token encryption key"}
+              : "Set the GitHub OAuth client credentials and token encryption key"}
           </p>
 
           {canManageSources && githubOAuthReady && databaseReady ? (
@@ -207,37 +244,55 @@ export default async function SettingsPage({
             </div>
           ) : null}
 
-          {canManageSources &&
-          githubOAuthReady &&
-          databaseReady &&
-          githubAccounts.some((account) => account.status === "active") ? (
-            <form action={addGitHubRepositoryAction} className="save-form connection-action">
-              <h3>Add a repository</h3>
-              <label className="pf-field">
-                <span className="pf-field-label">GitHub account</span>
-                <select className="pf-input" name="organizationAccountId" required>
-                  {githubAccounts
-                    .filter((account) => account.status === "active")
-                    .map((account) => (
-                      <option key={account.id} value={account.id}>
-                        @{account.login}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="pf-field">
-                <span className="pf-field-label">Repository owner</span>
-                <input className="pf-input" name="owner" placeholder="company" required />
-              </label>
-              <label className="pf-field">
-                <span className="pf-field-label">Repository name</span>
-                <input className="pf-input" name="repository" placeholder="knowledge" required />
-              </label>
-              <button className="pf-button pf-button-secondary" type="submit">
-                Add repository
-              </button>
-            </form>
-          ) : null}
+          {canManageSources && githubOAuthReady && databaseReady
+            ? githubAccounts
+                .filter((account) => account.status === "active")
+                .map((account) => {
+                  const choice = repositoryChoices.get(account.id);
+                  const availableRepositories = (choice?.repositories ?? []).filter(
+                    (repository) => !connectedRepositories.has(repository.fullName.toLowerCase()),
+                  );
+                  return (
+                    <form
+                      action={addGitHubRepositoryAction}
+                      className="save-form connection-action"
+                      key={account.id}
+                    >
+                      <h3>Add a repository from @{account.login}</h3>
+                      <input name="organizationAccountId" type="hidden" value={account.id} />
+                      {choice?.error ? (
+                        <p className="metric-note">
+                          Could not load repositories. Check GitHub access and try again.
+                        </p>
+                      ) : availableRepositories.length ? (
+                        <>
+                          <label className="pf-field">
+                            <span className="pf-field-label">Available repositories</span>
+                            <select className="pf-input" name="repository" required>
+                              <option value="">Select a repository</option>
+                              {availableRepositories.map((repository) => (
+                                <option key={repository.id} value={repository.fullName}>
+                                  {repository.fullName} ·{" "}
+                                  {repository.isPrivate ? "Private" : "Public"}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button className="pf-button pf-button-secondary" type="submit">
+                            Add repository
+                          </button>
+                        </>
+                      ) : (
+                        <p className="metric-note">
+                          {choice?.repositories.length
+                            ? "All repositories available to this account are already connected."
+                            : "No repositories are available to this account."}
+                        </p>
+                      )}
+                    </form>
+                  );
+                })
+            : null}
 
           {githubSources.length ? (
             <div className="connection-action">
@@ -332,13 +387,14 @@ export default async function SettingsPage({
             introspection.
           </li>
           <li>
-            Configure the GitHub App callback URL <code>{githubCallbackUrl}</code>, repository
-            Contents read/write and Pull requests read/write permissions, plus the server-side
-            client ID, client secret, and 32-byte token encryption key.
+            Create a GitHub OAuth App with callback URL <code>{githubCallbackUrl}</code>, then
+            configure its server-side client ID and secret plus a 32-byte token encryption key. Each
+            connected account authorizes the <code>repo</code> scope; admins select which accessible
+            repositories ProEngram connects.
           </li>
           <li>
-            Give each GitHub account access to the app installation and repositories it will
-            connect.
+            Connect GitHub accounts and select repositories from the live repository list. No
+            repository names are hard-coded or installed ahead of time.
           </li>
           <li>
             Apply numbered database migrations with <code>pnpm db:migrate</code>.

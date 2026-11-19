@@ -19,13 +19,15 @@ async function requireActionIdentity(action: string) {
 
 export async function addGitHubRepositoryAction(formData: FormData): Promise<void> {
   const identity = await requireActionIdentity("source:manage");
+  const [owner, repository, extra] = String(formData.get("repository") ?? "").split("/");
+  if (!owner || !repository || extra) redirect("/settings?githubRepository=error");
   try {
     await addGitHubRepositorySource({
       organizationId: identity.organization.organizationId,
       subjectId: identity.subjectId,
       organizationAccountId: String(formData.get("organizationAccountId") ?? ""),
-      owner: String(formData.get("owner") ?? ""),
-      repository: String(formData.get("repository") ?? ""),
+      owner,
+      repository,
     });
   } catch {
     redirect("/settings?githubRepository=error");
