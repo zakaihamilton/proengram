@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authorizeAppAction, getDashboardIdentity } from "@/lib/auth/session";
 import { getPool } from "@/lib/db/pool";
-import { writeActivity } from "@/lib/db/brain";
+import { replaceBrainChunks, writeActivity, writeItemVersion } from "@/lib/db/brain";
 
 type CatalogRule = { ruleId: string; label: string; description?: string; category?: string };
 
@@ -80,7 +80,7 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
       ]
         .filter(Boolean)
         .join("\n\n");
-      await client.query(
+      const stored = await client.query<{ id: string }>(
         `INSERT INTO brain_items
           (id, organization_id, kind, external_key, title, markdown, source_revision, is_active)
          VALUES ($1, $2, 'sentry8_policy', $3, $4, $5, $6, true)
@@ -91,7 +91,8 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
            markdown = EXCLUDED.markdown,
            source_revision = EXCLUDED.source_revision,
            is_active = true,
-           updated_at = now()`,
+           updated_at = now()
+         RETURNING id`,
         [
           randomUUID(),
           identity.organization.organizationId,
@@ -101,6 +102,20 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
           catalog.revision,
         ],
       );
+      const itemId = stored.rows[0]?.id;
+      if (!itemId) throw new Error("A Sentry8 policy snapshot could not be retrieved.");
+      await writeItemVersion(client, {
+        organizationId: identity.organization.organizationId,
+        itemId,
+        markdown,
+        sourceRevision: catalog.revision,
+      });
+      await replaceBrainChunks(client, {
+        organizationId: identity.organization.organizationId,
+        itemId,
+        markdown,
+        title: rule.label,
+      });
     }
     await writeActivity(client, {
       id: randomUUID(),

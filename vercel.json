@@ -11,6 +11,16 @@
       "path": "/api/cron/github-reconcile",
       "requestMethod": "GET",
       "schedule": "17 4 * * *"
+    },
+    "google-drive-sync-worker": {
+      "path": "/api/cron/google-drive-sync",
+      "requestMethod": "GET",
+      "schedule": "*/15 * * * *"
+    },
+    "google-drive-daily-reconciliation": {
+      "path": "/api/cron/google-drive-reconcile",
+      "requestMethod": "GET",
+      "schedule": "47 4 * * *"
     }
   }
 }

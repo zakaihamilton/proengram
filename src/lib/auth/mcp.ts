@@ -200,8 +200,12 @@ const MAX_MCP_REQUEST_BYTES = 4 * 1024 * 1024;
 const TOOL_ACTIONS: Record<string, string> = {
   search_knowledge: "brain:read",
   get_document: "brain:read",
+  get_document_history: "brain:read",
+  list_project_history: "brain:read",
   get_policy: "policy:read",
   save_result: "result:save",
+  save_memory: "result:save",
+  submit_knowledge_feedback: "brain:feedback",
   propose_markdown_change: "knowledge:propose",
 };
 

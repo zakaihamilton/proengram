@@ -26,6 +26,12 @@ const links = [
   },
   { href: "/activity", label: "Activity", icon: "M4 17v-4M10 17V7M16 17v-7M22 17V4" },
   {
+    href: "/feedback",
+    label: "Feedback",
+    icon: "M20 11.5a7.5 7.5 0 0 1-7.5 7.5H7l-4 2v-5A7.5 7.5 0 1 1 20 11.5zM8 11h8M8 14h5",
+    managerOnly: true,
+  },
+  {
     href: "/settings",
     label: "Settings",
     icon: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7ZM19.4 13.5a7.8 7.8 0 0 0 0-3l1.8-1.4-1.8-3.1-2.2.8a7.6 7.6 0 0 0-2.6-1.5L14.2 3h-3.6l-.4 2.3a7.6 7.6 0 0 0-2.6 1.5l-2.2-.8-1.8 3.1 1.8 1.4a7.8 7.8 0 0 0 0 3l-1.8 1.4 1.8 3.1 2.2-.8a7.6 7.6 0 0 0 2.6 1.5l.4 2.3h3.6l.4-2.3a7.6 7.6 0 0 0 2.6-1.5l2.2.8 1.8-3.1z",
@@ -52,12 +58,14 @@ export function AppShell({
   email,
   organizationId,
   organizations,
+  canReviewFeedback,
 }: {
   children: ReactNode;
   userName: string;
   email: string | null;
   organizationId: string;
   organizations: Array<{ organizationId: string; name: string }>;
+  canReviewFeedback: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -100,21 +108,23 @@ export function AppShell({
       navigation={
         <nav aria-label="Main navigation" className="pf-sidebar-group">
           <p className="pf-sidebar-group-label">COMPANY BRAIN</p>
-          {links.map((link) => {
-            const active =
-              link.href === "/overview" ? pathname === link.href : pathname.startsWith(link.href);
-            return (
-              <Link
-                aria-current={active ? "page" : undefined}
-                className="pf-sidebar-link"
-                href={link.href}
-                key={link.href}
-              >
-                <NavIcon path={link.icon} />
-                <span>{link.label}</span>
-              </Link>
-            );
-          })}
+          {links
+            .filter((link) => !link.managerOnly || canReviewFeedback)
+            .map((link) => {
+              const active =
+                link.href === "/overview" ? pathname === link.href : pathname.startsWith(link.href);
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
+                  className="pf-sidebar-link"
+                  href={link.href}
+                  key={link.href}
+                >
+                  <NavIcon path={link.icon} />
+                  <span>{link.label}</span>
+                </Link>
+              );
+            })}
         </nav>
       }
       sidebarFooter={
