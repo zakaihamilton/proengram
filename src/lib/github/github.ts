@@ -1,9 +1,16 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { getPublicOrigin } from "@/lib/auth/config";
 import { getPool } from "@/lib/db/pool";
 import { writeActivity } from "@/lib/db/brain";
 import { getGitHubAccessToken, isGitHubConfigured } from "./connections";
+import { enqueueGitHubSyncJob } from "./sync-jobs";
+import { decryptGitHubToken, encryptGitHubToken } from "./token-crypto";
+import {
+  createGitHubRepositoryWebhook,
+  deleteGitHubRepositoryWebhook,
+} from "./webhook-api";
 
 export { isGitHubConfigured } from "./connections";
 
@@ -33,6 +40,13 @@ type GitHubRepositorySourceRow = {
   repository_name: string;
   default_branch: string;
   status: "active" | "needs_auth" | "disabled";
+  github_webhook_id?: string | null;
+  github_webhook_secret_ciphertext?: string | null;
+  github_webhook_status?: "pending" | "active" | "failed" | "disabled";
+  github_webhook_last_error?: string | null;
+  last_synced_commit_sha?: string | null;
+  updated_by_subject_id?: string | null;
+  sync_pending?: boolean;
   github_login: string | null;
   account_status: "active" | "reauthorize_required" | null;
   last_synced_at: Date | string | null;
@@ -47,7 +61,11 @@ export type GitHubRepositorySource = {
   repository: string;
   defaultBranch: string;
   status: "active" | "needs_auth" | "disabled";
+  webhookStatus: "pending" | "active" | "failed" | "disabled";
+  webhookError: string | null;
+  syncPending: boolean;
   lastSyncedAt: string | null;
+  lastSyncedCommitSha: string | null;
 };
 
 type ResolvedGitHubSource = GitHubRepositorySource & { organizationId: string };
@@ -100,7 +118,11 @@ function mapSource(row: GitHubRepositorySourceRow): GitHubRepositorySource {
         : connected && row.status === "active"
           ? "active"
           : "needs_auth",
+    webhookStatus: row.github_webhook_status ?? "pending",
+    webhookError: row.github_webhook_last_error ?? null,
+    syncPending: false,
     lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : null,
+    lastSyncedCommitSha: row.last_synced_commit_sha ?? null,
   };
 }
 
@@ -118,9 +140,17 @@ export async function listGitHubRepositorySources(
             source.repository_name,
             source.default_branch,
             source.status,
+            source.github_webhook_status,
+            source.github_webhook_last_error,
             source.last_synced_at,
+            source.last_synced_commit_sha,
             account.github_login,
-            account.status AS account_status
+            account.status AS account_status,
+            EXISTS (
+              SELECT 1 FROM github_sync_jobs AS job
+               WHERE job.source_id = source.id
+                 AND job.status IN ('pending', 'running')
+            ) AS sync_pending
        FROM github_repository_sources AS source
        LEFT JOIN github_organization_accounts AS link
          ON link.id = source.organization_account_id
@@ -132,7 +162,7 @@ export async function listGitHubRepositorySources(
       ORDER BY source.repository_owner, source.repository_name`,
     [organizationId],
   );
-  return result.rows.map(mapSource);
+  return result.rows.map((row) => ({ ...mapSource(row), syncPending: row.sync_pending === true }));
 }
 
 export async function listGitHubAccountRepositories(
@@ -197,7 +227,13 @@ async function getRepositorySource(
             source.repository_name,
             source.default_branch,
             source.status,
+            source.github_webhook_id,
+            source.github_webhook_secret_ciphertext,
+            source.github_webhook_status,
+            source.github_webhook_last_error,
             source.last_synced_at,
+            source.last_synced_commit_sha,
+            source.updated_by_subject_id,
             account.github_login,
             account.status AS account_status
        FROM github_repository_sources AS source
@@ -214,6 +250,308 @@ async function getRepositorySource(
   );
   const row = result.rows[0];
   return row ? { ...mapSource(row), organizationId } : null;
+}
+
+export type GitHubWebhookSource = {
+  id: string;
+  organizationId: string;
+  organizationAccountId: string;
+  repositoryId: string | null;
+  owner: string;
+  repository: string;
+  defaultBranch: string;
+  actorSubjectId: string;
+  secret: string;
+};
+
+export async function listGitHubWebhookSources(hookId: string): Promise<GitHubWebhookSource[]> {
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const result = await pool.query<{
+    id: string;
+    organization_id: string;
+    organization_account_id: string;
+    github_repository_id: string | null;
+    repository_owner: string;
+    repository_name: string;
+    default_branch: string;
+    github_webhook_secret_ciphertext: string;
+    updated_by_subject_id: string | null;
+    connected_by_subject_id: string;
+  }>(
+    `SELECT source.id,
+            source.organization_id,
+            link.id AS organization_account_id,
+            source.github_repository_id,
+            source.repository_owner,
+            source.repository_name,
+            source.default_branch,
+            source.github_webhook_secret_ciphertext,
+            source.updated_by_subject_id,
+            link.connected_by_subject_id
+       FROM github_repository_sources AS source
+       JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       JOIN github_oauth_accounts AS account
+         ON account.id = link.github_oauth_account_id
+      WHERE source.github_webhook_id = $1
+        AND source.github_webhook_secret_ciphertext IS NOT NULL
+        AND source.github_webhook_status = 'active'
+        AND source.status = 'active'
+        AND account.status = 'active'
+      ORDER BY source.organization_id`,
+    [hookId],
+  );
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    organizationId: String(row.organization_id),
+    organizationAccountId: String(row.organization_account_id),
+    repositoryId: row.github_repository_id === null ? null : String(row.github_repository_id),
+    owner: String(row.repository_owner),
+    repository: String(row.repository_name),
+    defaultBranch: String(row.default_branch),
+    actorSubjectId: row.updated_by_subject_id ?? row.connected_by_subject_id,
+    secret: decryptGitHubToken(row.github_webhook_secret_ciphertext),
+  }));
+}
+
+export async function ensureGitHubRepositoryWebhook(
+  organizationId: string,
+  sourceId: string,
+  subjectId: string,
+): Promise<boolean> {
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const preflight = await pool.query<{
+    organization_account_id: string | null;
+    webhook_id: string | null;
+    webhook_secret_ciphertext: string | null;
+    webhook_status: string;
+  }>(
+    `SELECT source.organization_account_id,
+            source.github_webhook_id AS webhook_id,
+            source.github_webhook_secret_ciphertext AS webhook_secret_ciphertext,
+            source.github_webhook_status AS webhook_status
+       FROM github_repository_sources AS source
+       JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       JOIN github_oauth_accounts AS account
+         ON account.id = link.github_oauth_account_id
+      WHERE source.organization_id = $1
+        AND source.id = $2
+        AND source.status = 'active'
+        AND account.status = 'active'
+      LIMIT 1`,
+    [organizationId, sourceId],
+  );
+  const existingSource = preflight.rows[0];
+  if (!existingSource?.organization_account_id) return false;
+  if (
+    existingSource.webhook_id &&
+    existingSource.webhook_secret_ciphertext &&
+    existingSource.webhook_status === "active"
+  ) {
+    return true;
+  }
+  let token: string;
+  try {
+    token = await getGitHubAccessToken(organizationId, existingSource.organization_account_id);
+  } catch (error) {
+    await pool
+      .query(
+        `UPDATE github_repository_sources
+            SET github_webhook_status = 'failed',
+                github_webhook_last_error = $3,
+                updated_at = now()
+          WHERE organization_id = $1 AND id = $2 AND status = 'active'`,
+        [
+          organizationId,
+          sourceId,
+          error instanceof Error ? error.message.slice(0, 300) : "Webhook setup failed.",
+        ],
+      )
+      .catch(() => undefined);
+    return false;
+  }
+  const client = await pool.connect();
+  let transaction = false;
+  try {
+    await client.query("BEGIN");
+    transaction = true;
+    const result = await client.query<{
+      organization_account_id: string | null;
+      repository_id: string | null;
+      owner: string;
+      repository: string;
+      webhook_id: string | null;
+      webhook_secret_ciphertext: string | null;
+      webhook_status: string;
+      account_status: string | null;
+    }>(
+      `SELECT source.organization_account_id,
+              source.github_repository_id AS repository_id,
+              source.repository_owner AS owner,
+              source.repository_name AS repository,
+              source.github_webhook_id AS webhook_id,
+              source.github_webhook_secret_ciphertext AS webhook_secret_ciphertext,
+              source.github_webhook_status AS webhook_status,
+              account.status AS account_status
+         FROM github_repository_sources AS source
+         LEFT JOIN github_organization_accounts AS link
+           ON link.id = source.organization_account_id
+          AND link.organization_id = source.organization_id
+         LEFT JOIN github_oauth_accounts AS account
+           ON account.id = link.github_oauth_account_id
+        WHERE source.organization_id = $1
+          AND source.id = $2
+          AND source.status = 'active'
+        FOR UPDATE OF source`,
+      [organizationId, sourceId],
+    );
+    const source = result.rows[0];
+    if (!source?.organization_account_id || source.account_status !== "active") {
+      await client.query("COMMIT");
+      return false;
+    }
+    if (source.organization_account_id !== existingSource.organization_account_id) {
+      await client.query("COMMIT");
+      return false;
+    }
+    if (source.webhook_id && source.webhook_secret_ciphertext && source.webhook_status === "active") {
+      await client.query("COMMIT");
+      return true;
+    }
+
+    if (source.repository_id) {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `proengram:github-webhook:${source.repository_id}`,
+      ]);
+      const shared = await client.query<{
+        github_webhook_id: string;
+        github_webhook_secret_ciphertext: string;
+      }>(
+        `SELECT github_webhook_id, github_webhook_secret_ciphertext
+           FROM github_repository_sources
+          WHERE github_repository_id = $1
+            AND id <> $2
+            AND status = 'active'
+            AND github_webhook_status = 'active'
+            AND github_webhook_id IS NOT NULL
+            AND github_webhook_secret_ciphertext IS NOT NULL
+          ORDER BY created_at
+          LIMIT 1`,
+        [source.repository_id, sourceId],
+      );
+      const sharedHook = shared.rows[0];
+      if (sharedHook) {
+        await client.query(
+          `UPDATE github_repository_sources
+              SET github_webhook_id = $3,
+                  github_webhook_secret_ciphertext = $4,
+                  github_webhook_status = 'active',
+                  github_webhook_last_error = NULL,
+                  updated_at = now()
+            WHERE organization_id = $1 AND id = $2`,
+          [
+            organizationId,
+            sourceId,
+            sharedHook.github_webhook_id,
+            sharedHook.github_webhook_secret_ciphertext,
+          ],
+        );
+        await client.query("COMMIT");
+        return true;
+      }
+    }
+
+    if (source.webhook_id) {
+      await deleteGitHubRepositoryWebhook({
+        token,
+        owner: source.owner,
+        repository: source.repository,
+        webhookId: source.webhook_id,
+      }).catch(() => undefined);
+    }
+    const secret = randomBytes(32).toString("base64url");
+    const webhookId = await createGitHubRepositoryWebhook({
+      token,
+      owner: source.owner,
+      repository: source.repository,
+      callbackUrl: new URL("/api/github/webhook", getPublicOrigin()).toString(),
+      secret,
+    });
+    await client.query(
+      `UPDATE github_repository_sources
+          SET github_webhook_id = $3,
+              github_webhook_secret_ciphertext = $4,
+              github_webhook_status = 'active',
+              github_webhook_last_error = NULL,
+              updated_at = now()
+        WHERE organization_id = $1 AND id = $2`,
+      [organizationId, sourceId, webhookId, encryptGitHubToken(secret)],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    if (transaction) {
+      const message = error instanceof Error ? error.message.slice(0, 300) : "Webhook setup failed.";
+      await client
+        .query(
+          `UPDATE github_repository_sources
+              SET github_webhook_status = 'failed',
+                  github_webhook_last_error = $3,
+                  updated_at = now()
+            WHERE organization_id = $1 AND id = $2`,
+          [organizationId, sourceId, message],
+        )
+        .catch(() => undefined);
+      await client.query("COMMIT").catch(() => client.query("ROLLBACK")).catch(() => undefined);
+    }
+    console.error("GitHub repository webhook setup failed.");
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
+export async function repairGitHubRepositoryWebhooks(): Promise<{ checked: number; active: number }> {
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const result = await pool.query<{ organization_id: string; source_id: string; actor_subject_id: string }>(
+    `SELECT source.organization_id,
+            source.id AS source_id,
+            COALESCE(source.updated_by_subject_id, link.connected_by_subject_id, 'system:github-sync')
+              AS actor_subject_id
+       FROM github_repository_sources AS source
+       JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       JOIN github_oauth_accounts AS account
+         ON account.id = link.github_oauth_account_id
+      WHERE source.status = 'active'
+        AND account.status = 'active'
+        AND (source.github_webhook_status <> 'active'
+          OR source.github_webhook_id IS NULL
+          OR source.github_webhook_secret_ciphertext IS NULL)
+      ORDER BY source.created_at`,
+  );
+  let active = 0;
+  for (let offset = 0; offset < result.rows.length; offset += 5) {
+    const batch = result.rows.slice(offset, offset + 5);
+    const outcomes = await Promise.all(
+      batch.map((source) =>
+        ensureGitHubRepositoryWebhook(
+          String(source.organization_id),
+          String(source.source_id),
+          String(source.actor_subject_id),
+        ),
+      ),
+    );
+    active += outcomes.filter(Boolean).length;
+  }
+  return { checked: result.rows.length, active };
 }
 
 export async function addGitHubRepositorySource(input: {
@@ -267,6 +605,11 @@ export async function addGitHubRepositorySource(input: {
          organization_account_id = EXCLUDED.organization_account_id,
          github_repository_id = EXCLUDED.github_repository_id,
          default_branch = EXCLUDED.default_branch,
+         last_synced_commit_sha = CASE
+           WHEN github_repository_sources.default_branch IS DISTINCT FROM EXCLUDED.default_branch
+             THEN NULL
+           ELSE github_repository_sources.last_synced_commit_sha
+         END,
          status = 'active',
          updated_by_subject_id = EXCLUDED.updated_by_subject_id,
          updated_at = now()
@@ -312,6 +655,51 @@ export async function removeGitHubRepositorySource(input: {
 }): Promise<boolean> {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const current = await pool.query<{
+    organization_account_id: string | null;
+    github_repository_id: string | null;
+    repository_owner: string;
+    repository_name: string;
+    github_webhook_id: string | null;
+  }>(
+    `SELECT organization_account_id, github_repository_id,
+            repository_owner, repository_name, github_webhook_id
+       FROM github_repository_sources
+      WHERE organization_id = $1 AND id = $2 AND status <> 'disabled'`,
+    [input.organizationId, input.sourceId],
+  );
+  const existing = current.rows[0];
+  let webhookDeleted = false;
+  if (existing?.github_webhook_id && existing.organization_account_id) {
+    try {
+      const otherSource = existing.github_repository_id
+        ? await pool.query(
+            `SELECT 1 FROM github_repository_sources
+              WHERE github_repository_id = $1
+                AND id <> $2
+                AND status = 'active'
+                AND github_webhook_id = $3
+              LIMIT 1`,
+            [existing.github_repository_id, input.sourceId, existing.github_webhook_id],
+          )
+        : { rowCount: 0 };
+      if ((otherSource.rowCount ?? 0) === 0) {
+        const token = await getGitHubAccessToken(
+          input.organizationId,
+          existing.organization_account_id,
+        );
+        await deleteGitHubRepositoryWebhook({
+          token,
+          owner: existing.repository_owner,
+          repository: existing.repository_name,
+          webhookId: existing.github_webhook_id,
+        });
+      }
+      webhookDeleted = true;
+    } catch {
+      console.error("GitHub repository webhook cleanup failed during source removal.");
+    }
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -321,10 +709,19 @@ export async function removeGitHubRepositorySource(input: {
       repository_name: string;
     }>(
       `UPDATE github_repository_sources
-          SET status = 'disabled', updated_by_subject_id = $3, updated_at = now()
+          SET status = 'disabled',
+              github_webhook_id = CASE WHEN $4 THEN NULL ELSE github_webhook_id END,
+              github_webhook_secret_ciphertext = CASE
+                WHEN $4 THEN NULL
+                ELSE github_webhook_secret_ciphertext
+              END,
+              github_webhook_status = CASE WHEN $4 THEN 'disabled' ELSE github_webhook_status END,
+              github_webhook_last_error = CASE WHEN $4 THEN NULL ELSE github_webhook_last_error END,
+              updated_by_subject_id = $3,
+              updated_at = now()
         WHERE organization_id = $1 AND id = $2 AND status <> 'disabled'
         RETURNING id, repository_owner, repository_name`,
-      [input.organizationId, input.sourceId, input.subjectId],
+      [input.organizationId, input.sourceId, input.subjectId, webhookDeleted],
     );
     const source = result.rows[0];
     if (!source) {
@@ -335,6 +732,17 @@ export async function removeGitHubRepositorySource(input: {
       `UPDATE brain_items
           SET is_active = false, updated_at = now()
         WHERE organization_id = $1 AND kind = 'github_markdown' AND source_id = $2`,
+      [input.organizationId, input.sourceId],
+    );
+    await client.query(
+      `UPDATE github_sync_jobs
+          SET status = 'cancelled',
+              locked_until = NULL,
+              last_error = 'The repository was disconnected.',
+              completed_at = now(),
+              updated_at = now()
+        WHERE organization_id = $1 AND source_id = $2
+          AND status IN ('pending', 'running')`,
       [input.organizationId, input.sourceId],
     );
     await writeActivity(client, {
@@ -413,6 +821,7 @@ export async function syncGitHubMarkdown(
   organizationId: string,
   sourceId: string,
   subjectId: string,
+  options: { commitSha?: string; skipIfUnchanged?: boolean } = {},
 ) {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
@@ -429,8 +838,34 @@ export async function syncGitHubMarkdown(
 
   try {
     const token = await getGitHubAccessToken(organizationId, source.organizationAccountId);
+    const commitSha = options.commitSha
+      ? options.commitSha
+      : (
+          await githubJson<{ sha?: string }>(
+            apiPath(source, `/commits/${encodeURIComponent(source.defaultBranch)}`),
+            token,
+          )
+        ).sha;
+    if (!commitSha || !/^[a-f0-9]{40,64}$/i.test(commitSha)) {
+      throw new Error("GitHub did not return a valid commit for the repository branch.");
+    }
+    if (options.skipIfUnchanged && source.lastSyncedCommitSha === commitSha) {
+      await pool.query(
+        `UPDATE source_syncs
+            SET status = 'succeeded', item_count = 0,
+                message = 'Repository content is already up to date.', completed_at = now()
+          WHERE id = $1`,
+        [syncId],
+      );
+      return {
+        itemCount: 0,
+        repository: `${source.owner}/${source.repository}`,
+        commitSha,
+        skipped: true,
+      };
+    }
     const tree = await githubJson<{ truncated?: boolean; tree?: GitHubTreeEntry[] }>(
-      apiPath(source, `/git/trees/${encodeURIComponent(source.defaultBranch)}?recursive=1`),
+      apiPath(source, `/git/trees/${encodeURIComponent(commitSha)}?recursive=1`),
       token,
     );
     if (tree.truncated) throw new Error("The GitHub tree is too large for a single safe sync.");
@@ -541,11 +976,19 @@ export async function syncGitHubMarkdown(
       [syncId, documents.length, `Synced ${source.owner}/${source.repository}`],
     );
     await pool.query(
-      `UPDATE github_repository_sources SET last_synced_at = now(), updated_at = now()
+      `UPDATE github_repository_sources
+          SET last_synced_at = now(),
+              last_synced_commit_sha = $3,
+              updated_at = now()
         WHERE organization_id = $1 AND id = $2`,
-      [organizationId, source.id],
+      [organizationId, source.id, commitSha],
     );
-    return { itemCount: documents.length, repository: `${source.owner}/${source.repository}` };
+    return {
+      itemCount: documents.length,
+      repository: `${source.owner}/${source.repository}`,
+      commitSha,
+      skipped: false,
+    };
   } catch (error) {
     await pool.query(
       `UPDATE source_syncs SET status = 'failed', message = $2, completed_at = now() WHERE id = $1`,

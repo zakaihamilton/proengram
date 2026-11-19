@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then pnpm db:migrate; fi && pnpm build",
+  "schedules": {
+    "github-sync-worker": {
+      "path": "/api/cron/github-sync",
+      "requestMethod": "GET",
+      "schedule": "*/15 * * * *"
+    },
+    "github-daily-reconciliation": {
+      "path": "/api/cron/github-reconcile",
+      "requestMethod": "GET",
+      "schedule": "17 4 * * *"
+    }
+  }
+}

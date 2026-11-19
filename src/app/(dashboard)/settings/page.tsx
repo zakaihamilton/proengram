@@ -14,6 +14,7 @@ import {
   addGitHubRepositoryAction,
   removeGitHubAccountAction,
   removeGitHubRepositoryAction,
+  retryGitHubWebhookAction,
   syncGitHubAction,
 } from "./actions";
 
@@ -83,6 +84,7 @@ export default async function SettingsPage({
   const githubState = first(params.github);
   const githubConnectionState = first(params.githubConnection);
   const githubRepositoryState = first(params.githubRepository);
+  const githubWebhookState = first(params.githubWebhook);
   const githubAccountState = first(params.githubAccount);
   const count = first(params.count);
   const githubCallbackUrl = new URL("/auth/github/callback", getPublicOrigin()).toString();
@@ -115,7 +117,9 @@ export default async function SettingsPage({
         </Alert>
       ) : null}
       {githubRepositoryState === "added" ? (
-        <Alert tone="success">GitHub repository connected to this organization.</Alert>
+        <Alert tone="success">
+          GitHub repository connected. Its initial Markdown sync has been queued.
+        </Alert>
       ) : null}
       {githubRepositoryState === "removed" ? (
         <Alert tone="success">
@@ -132,6 +136,14 @@ export default async function SettingsPage({
       ) : null}
       {githubAccountState === "error" ? (
         <Alert tone="error">GitHub account could not be disconnected.</Alert>
+      ) : null}
+      {githubWebhookState === "active" ? (
+        <Alert tone="success">Push-triggered GitHub sync is enabled.</Alert>
+      ) : null}
+      {githubWebhookState === "error" ? (
+        <Alert tone="warning">
+          GitHub push sync could not be enabled. Scheduled checks and manual sync remain available.
+        </Alert>
       ) : null}
 
       <div className="connection-grid">
@@ -307,9 +319,13 @@ export default async function SettingsPage({
                       <span className="metric-note">
                         {source.githubLogin ? `@${source.githubLogin} · ` : ""}
                         {source.defaultBranch}
+                        {source.syncPending ? " · Sync queued" : ""}
                         {source.lastSyncedAt
                           ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
                           : ""}
+                        {source.webhookStatus === "active"
+                          ? " · Push sync enabled"
+                          : " · Scheduled sync only"}
                       </span>
                     </span>
                     <div className="connection-row-actions">
@@ -321,6 +337,16 @@ export default async function SettingsPage({
                           <input name="sourceId" type="hidden" value={source.id} />
                           <button className="text-link" type="submit">
                             Sync
+                          </button>
+                        </form>
+                      ) : null}
+                      {source.status === "active" &&
+                      canManageSources &&
+                      source.webhookStatus !== "active" ? (
+                        <form action={retryGitHubWebhookAction}>
+                          <input name="sourceId" type="hidden" value={source.id} />
+                          <button className="text-link" type="submit">
+                            Retry push setup
                           </button>
                         </form>
                       ) : null}

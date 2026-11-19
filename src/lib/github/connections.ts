@@ -17,6 +17,7 @@ import {
   encryptGitHubToken,
   isGitHubTokenEncryptionConfigured,
 } from "./token-crypto";
+import { deleteGitHubRepositoryWebhook } from "./webhook-api";
 
 type GitHubOAuthAccountRow = {
   id: string;
@@ -333,10 +334,58 @@ export async function removeGitHubAccountConnection(input: {
     );
     const isLastLink = Number(linkCountResult.rows[0]?.count ?? 0) <= 1;
 
-    if (isLastLink) {
+    let accessToken: string | null = null;
+    try {
+      accessToken = await getFreshAccessToken(client, account);
+    } catch {
+      console.error("GitHub account token refresh failed during account removal.");
+    }
+    const sourcesWithHooks = await client.query<{
+      id: string;
+      github_repository_id: string | null;
+      repository_owner: string;
+      repository_name: string;
+      github_webhook_id: string;
+    }>(
+      `SELECT id, github_repository_id, repository_owner, repository_name, github_webhook_id
+         FROM github_repository_sources
+        WHERE organization_id = $1
+          AND organization_account_id = $2
+          AND status = 'active'
+          AND github_webhook_id IS NOT NULL`,
+      [input.organizationId, input.organizationAccountId],
+    );
+    const hooksRemovedSourceIds: string[] = [];
+    if (accessToken) {
+      for (const source of sourcesWithHooks.rows) {
+        const sharedHook = await client.query(
+          `SELECT 1 FROM github_repository_sources
+            WHERE github_webhook_id = $1
+              AND id <> $2
+              AND status = 'active'
+            LIMIT 1`,
+          [source.github_webhook_id, source.id],
+        );
+        if ((sharedHook.rowCount ?? 0) > 0) {
+          hooksRemovedSourceIds.push(String(source.id));
+          continue;
+        }
+        try {
+          await deleteGitHubRepositoryWebhook({
+            token: accessToken,
+            owner: source.repository_owner,
+            repository: source.repository_name,
+            webhookId: source.github_webhook_id,
+          });
+          hooksRemovedSourceIds.push(String(source.id));
+        } catch {
+          console.error("GitHub repository webhook cleanup failed during account removal.");
+        }
+      }
+    }
+    if (isLastLink && accessToken) {
       try {
-        const token = await getFreshAccessToken(client, account);
-        if (token) await revokeGitHubAuthorization(token);
+        await revokeGitHubAuthorization(accessToken);
       } catch {
         console.error("GitHub authorization revocation failed during account removal.");
       }
@@ -353,12 +402,42 @@ export async function removeGitHubAccountConnection(input: {
       [input.organizationId, input.organizationAccountId],
     );
     await client.query(
+      `UPDATE github_sync_jobs
+          SET status = 'cancelled',
+              locked_until = NULL,
+              last_error = 'The GitHub account was disconnected.',
+              completed_at = now(),
+              updated_at = now()
+        WHERE organization_id = $1
+          AND source_id IN (
+            SELECT id FROM github_repository_sources WHERE organization_account_id = $2
+          )
+          AND status IN ('pending', 'running')`,
+      [input.organizationId, input.organizationAccountId],
+    );
+    await client.query(
       `UPDATE github_repository_sources
           SET organization_account_id = NULL,
               status = 'needs_auth',
+              github_webhook_id = CASE
+                WHEN id = ANY($3::uuid[]) THEN NULL
+                ELSE github_webhook_id
+              END,
+              github_webhook_secret_ciphertext = CASE
+                WHEN id = ANY($3::uuid[]) THEN NULL
+                ELSE github_webhook_secret_ciphertext
+              END,
+              github_webhook_status = CASE
+                WHEN id = ANY($3::uuid[]) THEN 'disabled'
+                ELSE github_webhook_status
+              END,
+              github_webhook_last_error = CASE
+                WHEN id = ANY($3::uuid[]) THEN NULL
+                ELSE github_webhook_last_error
+              END,
               updated_at = now()
         WHERE organization_id = $1 AND organization_account_id = $2`,
-      [input.organizationId, input.organizationAccountId],
+      [input.organizationId, input.organizationAccountId, hooksRemovedSourceIds],
     );
     await client.query(
       `DELETE FROM github_organization_accounts WHERE id = $1 AND organization_id = $2`,
