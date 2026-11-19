@@ -69,6 +69,27 @@ function requireDatabase(): void {
   if (!isDatabaseConfigured()) throw new Error("Nanogres PostgreSQL is not configured.");
 }
 
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const organizationIdSchema = z.string().trim().min(1).max(128).optional();
+
+async function authorizeBrainRead(principal: McpPrincipal, organizationId?: string) {
+  const organization = resolveMcpOrganization(principal, organizationId);
+  await authorizeMcpAction(principal, "brain:read", organization.organizationId);
+  requireDatabase();
+  const canReadPolicies = await canAuthorizeMcpAction(
+    principal,
+    "policy:read",
+    organization.organizationId,
+  );
+  return { organization, canReadPolicies };
+}
+
 function createServer(principal: McpPrincipal): McpServer {
   const server = new McpServer({ name: "ProEngram", version: "0.1.0" });
 
@@ -78,12 +99,7 @@ function createServer(principal: McpPrincipal): McpServer {
       title: "List ProEngram organizations",
       description: "List the ProEngram organizations available to your Perminister account.",
       inputSchema: {},
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      annotations: READ_ONLY_ANNOTATIONS,
     },
     async () => textResult(principal.organizations),
   );
@@ -97,24 +113,15 @@ function createServer(principal: McpPrincipal): McpServer {
       inputSchema: {
         query: z.string().trim().min(1).max(500),
         limit: z.number().int().min(1).max(20).optional(),
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ query, limit, organizationId }) =>
       withToolErrors(async () => {
-        const organization = resolveMcpOrganization(principal, organizationId);
-        await authorizeMcpAction(principal, "brain:read", organization.organizationId);
-        requireDatabase();
-        const canReadPolicies = await canAuthorizeMcpAction(
+        const { organization, canReadPolicies } = await authorizeBrainRead(
           principal,
-          "policy:read",
-          organization.organizationId,
+          organizationId,
         );
         const items = await searchBrainItems(
           organization.organizationId,
@@ -157,24 +164,15 @@ function createServer(principal: McpPrincipal): McpServer {
         "Fetch one result returned by search_knowledge, including its source and revision. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         id: z.string().uuid(),
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ id, organizationId }) =>
       withToolErrors(async () => {
-        const organization = resolveMcpOrganization(principal, organizationId);
-        await authorizeMcpAction(principal, "brain:read", organization.organizationId);
-        requireDatabase();
-        const canReadPolicies = await canAuthorizeMcpAction(
+        const { organization, canReadPolicies } = await authorizeBrainRead(
           principal,
-          "policy:read",
-          organization.organizationId,
+          organizationId,
         );
         const item = await getBrainItem(
           organization.organizationId,
@@ -194,14 +192,9 @@ function createServer(principal: McpPrincipal): McpServer {
         "Search policy snapshots imported from the configured Sentry8 source. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         query: z.string().trim().min(1).max(500).optional(),
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ query, organizationId }) =>
       withToolErrors(async () => {
@@ -238,7 +231,7 @@ function createServer(principal: McpPrincipal): McpServer {
       inputSchema: {
         title: z.string().trim().min(1).max(240),
         markdown: z.string().trim().min(1).max(30_000),
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
         citations: z
           .array(
             z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }),
@@ -282,14 +275,9 @@ function createServer(principal: McpPrincipal): McpServer {
       description:
         "List GitHub repositories connected to a ProEngram organization. Use sourceId with propose_markdown_change when an organization has multiple repositories. Pass organizationId when your account has multiple organizations.",
       inputSchema: {
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ organizationId }) =>
       withToolErrors(async () => {
@@ -322,7 +310,7 @@ function createServer(principal: McpPrincipal): McpServer {
         markdown: z.string().min(1).max(300_000),
         summary: z.string().trim().min(1).max(4000),
         sourceId: z.string().uuid().optional(),
-        organizationId: z.string().trim().min(1).max(128).optional(),
+        organizationId: organizationIdSchema,
       },
       annotations: {
         readOnlyHint: false,

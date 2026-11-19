@@ -15,6 +15,7 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "format:check": "biome format .",
+    "test": "node --test tests/*.test.mjs",
     "health": "repnix check --details",
     "health:audit": "repnix audit",
     "health:plan": "repnix setup --plan --format json",

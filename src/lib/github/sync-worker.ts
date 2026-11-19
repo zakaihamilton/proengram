@@ -1,11 +1,7 @@
 import "server-only";
 
 import { syncGitHubMarkdown } from "./github";
-import {
-  claimGitHubSyncJob,
-  completeGitHubSyncJob,
-  failGitHubSyncJob,
-} from "./sync-jobs";
+import { claimGitHubSyncJob, completeGitHubSyncJob, failGitHubSyncJob } from "./sync-jobs";
 
 export async function processGitHubSyncJob(jobId?: string): Promise<boolean> {
   const job = await claimGitHubSyncJob(jobId);

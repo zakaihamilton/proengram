@@ -1,9 +1,6 @@
 import { after } from "next/server";
 import { enqueueGitHubSyncJob } from "@/lib/github/sync-jobs";
-import {
-  listGitHubWebhookSources,
-  type GitHubWebhookSource,
-} from "@/lib/github/github";
+import { listGitHubWebhookSources, type GitHubWebhookSource } from "@/lib/github/github";
 import { processGitHubSyncJob } from "@/lib/github/sync-worker";
 import { verifyGitHubWebhookSignature } from "@/lib/github/webhook-api";
 import { getPool } from "@/lib/db/pool";
@@ -78,7 +75,8 @@ export async function POST(request: Request): Promise<Response> {
   if (!sources.length) return response(202);
 
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BODY_BYTES) return response(413);
+  if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BODY_BYTES)
+    return response(413);
 
   let rawBody: Buffer | null;
   try {
@@ -87,7 +85,13 @@ export async function POST(request: Request): Promise<Response> {
     return response(400);
   }
   if (!rawBody) return response(413);
-  if (!verifyGitHubWebhookSignature(rawBody, request.headers.get("x-hub-signature-256"), sources[0].secret)) {
+  if (
+    !verifyGitHubWebhookSignature(
+      rawBody,
+      request.headers.get("x-hub-signature-256"),
+      sources[0].secret,
+    )
+  ) {
     return response(401);
   }
   if (event === "ping") return Response.json({ received: true }, { status: 200 });

@@ -26,6 +26,27 @@ function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function InlineActionForm({
+  action,
+  fieldName,
+  value,
+  label,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  fieldName: string;
+  value: string;
+  label: string;
+}) {
+  return (
+    <form action={action}>
+      <input name={fieldName} type="hidden" value={value} />
+      <button className="text-link" type="submit">
+        {label}
+      </button>
+    </form>
+  );
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -242,12 +263,12 @@ export default async function SettingsPage({
                         </Link>
                       ) : null}
                       {canManageSources ? (
-                        <form action={removeGitHubAccountAction}>
-                          <input name="organizationAccountId" type="hidden" value={account.id} />
-                          <button className="text-link" type="submit">
-                            Remove
-                          </button>
-                        </form>
+                        <InlineActionForm
+                          action={removeGitHubAccountAction}
+                          fieldName="organizationAccountId"
+                          label="Remove"
+                          value={account.id}
+                        />
                       ) : null}
                     </div>
                   </div>
@@ -333,30 +354,30 @@ export default async function SettingsPage({
                         {source.status === "active" ? "Active" : "Reconnect account"}
                       </Badge>
                       {source.status === "active" && canSyncSources ? (
-                        <form action={syncGitHubAction}>
-                          <input name="sourceId" type="hidden" value={source.id} />
-                          <button className="text-link" type="submit">
-                            Sync
-                          </button>
-                        </form>
+                        <InlineActionForm
+                          action={syncGitHubAction}
+                          fieldName="sourceId"
+                          label="Sync"
+                          value={source.id}
+                        />
                       ) : null}
                       {source.status === "active" &&
                       canManageSources &&
                       source.webhookStatus !== "active" ? (
-                        <form action={retryGitHubWebhookAction}>
-                          <input name="sourceId" type="hidden" value={source.id} />
-                          <button className="text-link" type="submit">
-                            Retry push setup
-                          </button>
-                        </form>
+                        <InlineActionForm
+                          action={retryGitHubWebhookAction}
+                          fieldName="sourceId"
+                          label="Retry push setup"
+                          value={source.id}
+                        />
                       ) : null}
                       {canManageSources ? (
-                        <form action={removeGitHubRepositoryAction}>
-                          <input name="sourceId" type="hidden" value={source.id} />
-                          <button className="text-link" type="submit">
-                            Remove
-                          </button>
-                        </form>
+                        <InlineActionForm
+                          action={removeGitHubRepositoryAction}
+                          fieldName="sourceId"
+                          label="Remove"
+                          value={source.id}
+                        />
                       ) : null}
                     </div>
                   </div>
