@@ -505,6 +505,24 @@ select:focus-visible {
 .connection-card .connection-status {
   margin-top: 16px;
 }
+.connection-card h3 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.status-row > span:first-child .metric-note {
+  display: block;
+}
+.connection-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.connection-row-actions form {
+  margin: 0;
+}
 .table-wrap {
   overflow-x: auto;
 }

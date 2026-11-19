@@ -1,9 +1,11 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { importPKCS8, SignJWT } from "jose";
 import { getPool } from "@/lib/db/pool";
 import { writeActivity } from "@/lib/db/brain";
+import { getGitHubAccessToken, isGitHubConfigured } from "./connections";
+
+export { isGitHubConfigured } from "./connections";
 
 const API_ROOT = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -15,76 +17,33 @@ const MARKDOWN_FETCH_BATCH_SIZE = 8;
 type GitHubTreeEntry = { path?: string; type?: string; sha?: string; url?: string; size?: number };
 type GitHubBlob = { encoding?: string; content?: string; size?: number };
 
-type GitHubSettings = {
-  appId: string;
-  installationId: string;
-  privateKey: string;
+type GitHubRepositorySourceRow = {
+  id: string;
+  organization_id: string;
+  organization_account_id: string | null;
+  github_repository_id: string | null;
+  repository_owner: string;
+  repository_name: string;
+  default_branch: string;
+  status: "active" | "needs_auth" | "disabled";
+  github_login: string | null;
+  account_status: "active" | "reauthorize_required" | null;
+  last_synced_at: Date | string | null;
+};
+
+export type GitHubRepositorySource = {
+  id: string;
+  organizationAccountId: string | null;
+  githubLogin: string | null;
+  repositoryId: string | null;
   owner: string;
   repository: string;
   defaultBranch: string;
+  status: "active" | "needs_auth" | "disabled";
+  lastSyncedAt: string | null;
 };
 
-export type GitHubRepositorySettings = {
-  installationId: string;
-  owner: string;
-  repository: string;
-  defaultBranch: string;
-};
-
-function setting(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is not configured.`);
-  return value;
-}
-
-export function isGitHubConfigured(): boolean {
-  return ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"].every((key) =>
-    Boolean(process.env[key]?.trim()),
-  );
-}
-
-export async function getGitHubRepositorySettings(
-  organizationId: string,
-): Promise<GitHubRepositorySettings | null> {
-  const pool = await getPool();
-  if (!pool) return null;
-  const result = await pool.query(
-    `SELECT installation_id, repository_owner, repository_name, default_branch
-       FROM github_repository_settings WHERE organization_id = $1 LIMIT 1`,
-    [organizationId],
-  );
-  const row = result.rows[0] as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    installationId: String(row.installation_id),
-    owner: String(row.repository_owner),
-    repository: String(row.repository_name),
-    defaultBranch: String(row.default_branch),
-  };
-}
-
-async function createInstallationToken(settings: GitHubSettings): Promise<string> {
-  const key = await importPKCS8(settings.privateKey, "RS256");
-  const now = Math.floor(Date.now() / 1000);
-  const jwt = await new SignJWT({})
-    .setProtectedHeader({ alg: "RS256" })
-    .setIssuer(settings.appId)
-    .setIssuedAt(now - 60)
-    .setExpirationTime(now + 540)
-    .sign(key);
-  const response = await fetch(
-    `${API_ROOT}/app/installations/${encodeURIComponent(settings.installationId)}/access_tokens`,
-    {
-      method: "POST",
-      cache: "no-store",
-      headers: githubHeaders(jwt),
-    },
-  );
-  const result = (await response.json().catch(() => ({}))) as { token?: string };
-  if (!response.ok || !result.token)
-    throw new Error("GitHub App could not create an installation token.");
-  return result.token;
-}
+type ResolvedGitHubSource = GitHubRepositorySource & { organizationId: string };
 
 function githubHeaders(token: string): HeadersInit {
   return {
@@ -111,139 +70,238 @@ async function githubJson<T>(url: string, token: string, init?: RequestInit): Pr
   return body as T;
 }
 
-async function getSettings(organizationId: string): Promise<GitHubSettings> {
-  if (!isGitHubConfigured()) throw new Error("The ProEngram GitHub App is not configured.");
-  const repository = await getGitHubRepositorySettings(organizationId);
-  if (!repository) {
-    throw new Error(
-      "Connect a GitHub repository for this organization in Settings before syncing.",
-    );
-  }
+function apiPath(
+  source: Pick<GitHubRepositorySource, "owner" | "repository">,
+  suffix: string,
+): string {
+  return `${API_ROOT}/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}${suffix}`;
+}
+
+function mapSource(row: GitHubRepositorySourceRow): GitHubRepositorySource {
+  const connected = row.account_status === "active" && Boolean(row.organization_account_id);
   return {
-    appId: setting("GITHUB_APP_ID"),
-    privateKey: setting("GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
-    ...repository,
+    id: String(row.id),
+    organizationAccountId: row.organization_account_id,
+    githubLogin: row.github_login,
+    repositoryId: row.github_repository_id === null ? null : String(row.github_repository_id),
+    owner: String(row.repository_owner),
+    repository: String(row.repository_name),
+    defaultBranch: String(row.default_branch),
+    status:
+      row.status === "disabled"
+        ? "disabled"
+        : connected && row.status === "active"
+          ? "active"
+          : "needs_auth",
+    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : null,
   };
 }
 
-function validateRepositoryInput(input: {
-  installationId: string;
+export async function listGitHubRepositorySources(
+  organizationId: string,
+): Promise<GitHubRepositorySource[]> {
+  const pool = await getPool();
+  if (!pool) return [];
+  const result = await pool.query<GitHubRepositorySourceRow>(
+    `SELECT source.id,
+            source.organization_id,
+            source.organization_account_id,
+            source.github_repository_id,
+            source.repository_owner,
+            source.repository_name,
+            source.default_branch,
+            source.status,
+            source.last_synced_at,
+            account.github_login,
+            account.status AS account_status
+       FROM github_repository_sources AS source
+       LEFT JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       LEFT JOIN github_oauth_accounts AS account
+         ON account.id = link.github_oauth_account_id
+      WHERE source.organization_id = $1
+        AND source.status <> 'disabled'
+      ORDER BY source.repository_owner, source.repository_name`,
+    [organizationId],
+  );
+  return result.rows.map(mapSource);
+}
+
+async function getRepositorySource(
+  organizationId: string,
+  sourceId: string,
+  requireActive = true,
+): Promise<ResolvedGitHubSource | null> {
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const result = await pool.query<GitHubRepositorySourceRow>(
+    `SELECT source.id,
+            source.organization_id,
+            source.organization_account_id,
+            source.github_repository_id,
+            source.repository_owner,
+            source.repository_name,
+            source.default_branch,
+            source.status,
+            source.last_synced_at,
+            account.github_login,
+            account.status AS account_status
+       FROM github_repository_sources AS source
+       LEFT JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       LEFT JOIN github_oauth_accounts AS account
+         ON account.id = link.github_oauth_account_id
+      WHERE source.organization_id = $1
+        AND source.id = $2
+        ${requireActive ? "AND source.status = 'active' AND account.status = 'active'" : ""}
+      LIMIT 1`,
+    [organizationId, sourceId],
+  );
+  const row = result.rows[0];
+  return row ? { ...mapSource(row), organizationId } : null;
+}
+
+export async function addGitHubRepositorySource(input: {
+  organizationId: string;
+  organizationAccountId: string;
+  subjectId: string;
   owner: string;
   repository: string;
-  defaultBranch: string;
-}): GitHubRepositorySettings {
-  const installationId = input.installationId.trim();
+}): Promise<GitHubRepositorySource> {
+  if (!isGitHubConfigured()) throw new Error("GitHub OAuth is not configured.");
   const owner = input.owner.trim();
   const repository = input.repository.trim();
-  const defaultBranch = input.defaultBranch.trim();
-  if (!/^\d{1,20}$/.test(installationId)) {
-    throw new Error("Enter a valid GitHub App installation ID.");
-  }
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner)) {
     throw new Error("Enter a valid GitHub organization or account name.");
   }
   if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repository) || repository === "." || repository === "..") {
     throw new Error("Enter a valid GitHub repository name.");
   }
-  if (
-    !defaultBranch ||
-    defaultBranch.length > 255 ||
-    !/^[A-Za-z0-9_./-]+$/.test(defaultBranch) ||
-    defaultBranch.startsWith("/") ||
-    defaultBranch.endsWith("/") ||
-    defaultBranch.includes("..") ||
-    defaultBranch.includes("//")
-  ) {
-    throw new Error("Enter a valid default branch name.");
-  }
-  return { installationId, owner, repository, defaultBranch };
-}
 
-async function validateGitHubRepository(settings: GitHubSettings): Promise<void> {
-  const token = await createInstallationToken(settings);
-  const repository = await githubJson<{ full_name?: string }>(
-    `${API_ROOT}/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repository)}`,
-    token,
-  );
+  const token = await getGitHubAccessToken(input.organizationId, input.organizationAccountId);
+  const repo = await githubJson<{
+    id?: number | string;
+    full_name?: string;
+    default_branch?: string;
+  }>(`${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`, token);
   if (
-    repository.full_name?.toLowerCase() !== `${settings.owner}/${settings.repository}`.toLowerCase()
+    repo.full_name?.toLowerCase() !== `${owner}/${repository}`.toLowerCase() ||
+    repo.id === undefined ||
+    !repo.default_branch
   ) {
-    throw new Error("The selected repository is not available to this GitHub App installation.");
+    throw new Error("The selected repository is not available to this GitHub account.");
   }
   await githubJson(
-    apiPath(settings, `/git/ref/heads/${encodeURIComponent(settings.defaultBranch)}`),
+    apiPath({ owner, repository }, `/git/ref/heads/${encodeURIComponent(repo.default_branch)}`),
     token,
   );
+
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const client = await pool.connect();
+  let saved: GitHubRepositorySourceRow | undefined;
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<GitHubRepositorySourceRow>(
+      `INSERT INTO github_repository_sources
+        (id, organization_id, organization_account_id, github_repository_id,
+         repository_owner, repository_name, default_branch, status, updated_by_subject_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
+       ON CONFLICT (organization_id, repository_owner_normalized, repository_name_normalized)
+       DO UPDATE SET
+         organization_account_id = EXCLUDED.organization_account_id,
+         github_repository_id = EXCLUDED.github_repository_id,
+         default_branch = EXCLUDED.default_branch,
+         status = 'active',
+         updated_by_subject_id = EXCLUDED.updated_by_subject_id,
+         updated_at = now()
+       RETURNING id, organization_id, organization_account_id, github_repository_id,
+                 repository_owner, repository_name, default_branch, status, last_synced_at`,
+      [
+        randomUUID(),
+        input.organizationId,
+        input.organizationAccountId,
+        String(repo.id),
+        owner,
+        repository,
+        repo.default_branch,
+        input.subjectId,
+      ],
+    );
+    saved = result.rows[0];
+    if (!saved) throw new Error("The GitHub repository could not be saved.");
+    await writeActivity(client, {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      actorSubjectId: input.subjectId,
+      action: "source:manage",
+      itemKind: "github_markdown",
+      itemId: saved.id,
+      summary: `Connected GitHub repository ${owner}/${repository}.`,
+      metadata: { repository: `${owner}/${repository}`, sourceId: saved.id },
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+  return mapSource({ ...saved, github_login: null, account_status: "active" });
 }
 
-export async function saveGitHubRepositorySettings(input: {
+export async function removeGitHubRepositorySource(input: {
   organizationId: string;
+  sourceId: string;
   subjectId: string;
-  installationId: string;
-  owner: string;
-  repository: string;
-  defaultBranch: string;
-}): Promise<GitHubRepositorySettings> {
-  if (!isGitHubConfigured()) throw new Error("The ProEngram GitHub App is not configured.");
-  const repository = validateRepositoryInput(input);
-  const settings: GitHubSettings = {
-    appId: setting("GITHUB_APP_ID"),
-    privateKey: setting("GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
-    ...repository,
-  };
-  await validateGitHubRepository(settings);
-
+}): Promise<boolean> {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const result = await client.query<{
+      id: string;
+      repository_owner: string;
+      repository_name: string;
+    }>(
+      `UPDATE github_repository_sources
+          SET status = 'disabled', updated_by_subject_id = $3, updated_at = now()
+        WHERE organization_id = $1 AND id = $2 AND status <> 'disabled'
+        RETURNING id, repository_owner, repository_name`,
+      [input.organizationId, input.sourceId, input.subjectId],
+    );
+    const source = result.rows[0];
+    if (!source) {
+      await client.query("ROLLBACK");
+      return false;
+    }
     await client.query(
-      `INSERT INTO github_repository_settings
-        (organization_id, installation_id, repository_owner, repository_name, default_branch, updated_by_subject_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (organization_id) DO UPDATE SET
-         installation_id = EXCLUDED.installation_id,
-         repository_owner = EXCLUDED.repository_owner,
-         repository_name = EXCLUDED.repository_name,
-         default_branch = EXCLUDED.default_branch,
-         updated_by_subject_id = EXCLUDED.updated_by_subject_id,
-         updated_at = now()`,
-      [
-        input.organizationId,
-        repository.installationId,
-        repository.owner,
-        repository.repository,
-        repository.defaultBranch,
-        input.subjectId,
-      ],
+      `UPDATE brain_items
+          SET is_active = false, updated_at = now()
+        WHERE organization_id = $1 AND kind = 'github_markdown' AND source_id = $2`,
+      [input.organizationId, input.sourceId],
     );
     await writeActivity(client, {
       id: randomUUID(),
       organizationId: input.organizationId,
       actorSubjectId: input.subjectId,
-      action: "source:configure",
+      action: "source:manage",
       itemKind: "github_markdown",
-      summary: `Connected GitHub source ${repository.owner}/${repository.repository}.`,
-      metadata: { repository: `${repository.owner}/${repository.repository}` },
+      itemId: input.sourceId,
+      summary: `Disconnected GitHub repository ${source.repository_owner}/${source.repository_name}.`,
+      metadata: { sourceId: input.sourceId },
     });
     await client.query("COMMIT");
+    return true;
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
-  return repository;
-}
-
-function apiPath(settings: GitHubSettings, suffix: string): string {
-  return `${API_ROOT}/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repository)}${suffix}`;
-}
-
-function githubUrl(settings: GitHubSettings, branch: string, path: string): string {
-  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-  return `https://github.com/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repository)}/blob/${encodeURIComponent(branch)}/${encodedPath}`;
 }
 
 function safeMarkdownPath(path: string): boolean {
@@ -255,20 +313,71 @@ function safeMarkdownPath(path: string): boolean {
   );
 }
 
-export async function syncGitHubMarkdown(organizationId: string, subjectId: string) {
+async function resolveProposalSource(
+  organizationId: string,
+  requestedSourceId?: string,
+): Promise<ResolvedGitHubSource> {
+  if (requestedSourceId) {
+    const source = await getRepositorySource(organizationId, requestedSourceId);
+    if (!source) throw new Error("That GitHub source is not connected to this organization.");
+    return source;
+  }
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const settings = await getSettings(organizationId);
+  const result = await pool.query<GitHubRepositorySourceRow>(
+    `SELECT source.id,
+            source.organization_id,
+            source.organization_account_id,
+            source.github_repository_id,
+            source.repository_owner,
+            source.repository_name,
+            source.default_branch,
+            source.status,
+            source.last_synced_at,
+            account.github_login,
+            account.status AS account_status
+       FROM github_repository_sources AS source
+       JOIN github_organization_accounts AS link
+         ON link.id = source.organization_account_id
+        AND link.organization_id = source.organization_id
+       JOIN github_oauth_accounts AS account ON account.id = link.github_oauth_account_id
+      WHERE source.organization_id = $1
+        AND source.status = 'active'
+        AND account.status = 'active'
+      ORDER BY source.created_at
+      LIMIT 2`,
+    [organizationId],
+  );
+  if (result.rows.length === 0)
+    throw new Error("Connect a GitHub repository for this organization in Settings first.");
+  if (result.rows.length > 1) {
+    throw new Error("Pass sourceId from list_github_sources to choose a repository.");
+  }
+  return { ...mapSource(result.rows[0]), organizationId };
+}
+
+export async function syncGitHubMarkdown(
+  organizationId: string,
+  sourceId: string,
+  subjectId: string,
+) {
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const source = await getRepositorySource(organizationId, sourceId);
+  if (!source || !source.organizationAccountId) {
+    throw new Error("Reconnect this GitHub repository in Settings before syncing.");
+  }
   const syncId = randomUUID();
   await pool.query(
-    `INSERT INTO source_syncs (id, organization_id, source, status)
-     VALUES ($1, $2, 'github', 'running')`,
-    [syncId, organizationId],
+    `INSERT INTO source_syncs (id, organization_id, source, source_id, status)
+     VALUES ($1, $2, 'github', $3, 'running')`,
+    [syncId, organizationId, source.id],
   );
+
   try {
-    const token = await createInstallationToken(settings);
+    const token = await getGitHubAccessToken(organizationId, source.organizationAccountId);
     const tree = await githubJson<{ truncated?: boolean; tree?: GitHubTreeEntry[] }>(
-      apiPath(settings, `/git/trees/${encodeURIComponent(settings.defaultBranch)}?recursive=1`),
+      apiPath(source, `/git/trees/${encodeURIComponent(source.defaultBranch)}?recursive=1`),
       token,
     );
     if (tree.truncated) throw new Error("The GitHub tree is too large for a single safe sync.");
@@ -287,7 +396,7 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
           if (!entry.path || !entry.sha) return null;
           if (typeof entry.size !== "number" || entry.size > MAX_MARKDOWN_BYTES) return null;
           const blob = await githubJson<GitHubBlob>(
-            apiPath(settings, `/git/blobs/${entry.sha}`),
+            apiPath(source, `/git/blobs/${entry.sha}`),
             token,
           );
           if (blob.encoding !== "base64" || typeof blob.content !== "string") return null;
@@ -313,9 +422,10 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
     try {
       await client.query("BEGIN");
       await client.query(
-        `UPDATE brain_items SET is_active = false
-          WHERE organization_id = $1 AND kind = 'github_markdown'`,
-        [organizationId],
+        `UPDATE brain_items
+            SET is_active = false, updated_at = now()
+          WHERE organization_id = $1 AND source_id = $2 AND kind = 'github_markdown'`,
+        [organizationId, source.id],
       );
       for (const document of documents) {
         const title =
@@ -324,9 +434,11 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
           document.path;
         await client.query(
           `INSERT INTO brain_items
-            (id, organization_id, kind, external_key, title, markdown, source_url, source_revision, sync_batch_id, is_active)
-           VALUES ($1, $2, 'github_markdown', $3, $4, $5, $6, $7, $8, true)
-           ON CONFLICT (organization_id, kind, external_key) DO UPDATE SET
+            (id, organization_id, source_id, kind, external_key, title, markdown, source_url, source_revision, sync_batch_id, is_active)
+           VALUES ($1, $2, $3, 'github_markdown', $4, $5, $6, $7, $8, $9, true)
+           ON CONFLICT (organization_id, source_id, external_key)
+             WHERE kind = 'github_markdown' AND source_id IS NOT NULL
+           DO UPDATE SET
              title = EXCLUDED.title,
              markdown = EXCLUDED.markdown,
              source_url = EXCLUDED.source_url,
@@ -337,10 +449,11 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
           [
             randomUUID(),
             organizationId,
+            source.id,
             document.path,
             title.slice(0, 240),
             document.markdown,
-            githubUrl(settings, settings.defaultBranch, document.path),
+            `https://github.com/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/blob/${source.defaultBranch.split("/").map(encodeURIComponent).join("/")}/${document.path.split("/").map(encodeURIComponent).join("/")}`,
             document.sha,
             batchId,
           ],
@@ -352,25 +465,34 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
         actorSubjectId: subjectId,
         action: "source:sync",
         itemKind: "github_markdown",
-        summary: `Synced ${documents.length} Markdown files from GitHub.`,
+        itemId: source.id,
+        summary: `Synced ${documents.length} Markdown files from ${source.owner}/${source.repository}.`,
         metadata: {
           itemCount: documents.length,
-          repository: `${settings.owner}/${settings.repository}`,
+          sourceId: source.id,
+          repository: `${source.owner}/${source.repository}`,
         },
       });
       await client.query("COMMIT");
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
       client.release();
     }
+
     await pool.query(
-      `UPDATE source_syncs SET status = 'succeeded', item_count = $2, message = $3, completed_at = now()
+      `UPDATE source_syncs
+          SET status = 'succeeded', item_count = $2, message = $3, completed_at = now()
         WHERE id = $1`,
-      [syncId, documents.length, `Synced ${settings.owner}/${settings.repository}`],
+      [syncId, documents.length, `Synced ${source.owner}/${source.repository}`],
     );
-    return { itemCount: documents.length, repository: `${settings.owner}/${settings.repository}` };
+    await pool.query(
+      `UPDATE github_repository_sources SET last_synced_at = now(), updated_at = now()
+        WHERE organization_id = $1 AND id = $2`,
+      [organizationId, source.id],
+    );
+    return { itemCount: documents.length, repository: `${source.owner}/${source.repository}` };
   } catch (error) {
     await pool.query(
       `UPDATE source_syncs SET status = 'failed', message = $2, completed_at = now() WHERE id = $1`,
@@ -383,6 +505,7 @@ export async function syncGitHubMarkdown(organizationId: string, subjectId: stri
 export async function createMarkdownPullRequest(input: {
   organizationId: string;
   subjectId: string;
+  sourceId?: string;
   path: string;
   title: string;
   markdown: string;
@@ -390,10 +513,14 @@ export async function createMarkdownPullRequest(input: {
 }) {
   if (!safeMarkdownPath(input.path))
     throw new Error("Only Markdown files inside docs/ can be proposed.");
-  if (Buffer.byteLength(input.markdown, "utf8") > MAX_MARKDOWN_BYTES)
+  if (Buffer.byteLength(input.markdown, "utf8") > MAX_MARKDOWN_BYTES) {
     throw new Error("The proposed Markdown exceeds 300 KB.");
+  }
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is required to audit GitHub proposals.");
+  const source = await resolveProposalSource(input.organizationId, input.sourceId);
+  if (!source.organizationAccountId)
+    throw new Error("Reconnect this GitHub repository in Settings before proposing changes.");
   const activityId = randomUUID();
   await pool.query(
     `INSERT INTO activity_events
@@ -403,25 +530,24 @@ export async function createMarkdownPullRequest(input: {
       activityId,
       input.organizationId,
       input.subjectId,
-      input.path,
+      `${source.id}:${input.path}`,
       `Started GitHub proposal for ${input.path}.`,
-      JSON.stringify({ status: "pending", path: input.path }),
+      JSON.stringify({ status: "pending", sourceId: source.id, path: input.path }),
     ],
   );
 
   let result: { url: string; number: number; branch: string };
   try {
-    const settings = await getSettings(input.organizationId);
-    const token = await createInstallationToken(settings);
+    const token = await getGitHubAccessToken(input.organizationId, source.organizationAccountId);
     const baseRef = await githubJson<{ object?: { sha?: string } }>(
-      apiPath(settings, `/git/ref/heads/${encodeURIComponent(settings.defaultBranch)}`),
+      apiPath(source, `/git/ref/heads/${encodeURIComponent(source.defaultBranch)}`),
       token,
     );
     const baseSha = baseRef.object?.sha;
     if (!baseSha) throw new Error("GitHub did not return the default branch revision.");
 
     const proposalBranch = `proengram/proposal-${randomUUID().slice(0, 8)}`;
-    await githubJson(apiPath(settings, "/git/refs"), token, {
+    await githubJson(apiPath(source, "/git/refs"), token, {
       method: "POST",
       body: JSON.stringify({ ref: `refs/heads/${proposalBranch}`, sha: baseSha }),
     });
@@ -429,7 +555,7 @@ export async function createMarkdownPullRequest(input: {
     const encodedPath = input.path.split("/").map(encodeURIComponent).join("/");
     let existingSha: string | undefined;
     const existingResponse = await fetch(
-      `${apiPath(settings, `/contents/${encodedPath}`)}?ref=${encodeURIComponent(proposalBranch)}`,
+      `${apiPath(source, `/contents/${encodedPath}`)}?ref=${encodeURIComponent(proposalBranch)}`,
       { cache: "no-store", headers: githubHeaders(token) },
     );
     if (existingResponse.ok) {
@@ -439,7 +565,7 @@ export async function createMarkdownPullRequest(input: {
       throw new Error("GitHub could not read the target Markdown file.");
     }
 
-    await githubJson(apiPath(settings, `/contents/${encodedPath}`), token, {
+    await githubJson(apiPath(source, `/contents/${encodedPath}`), token, {
       method: "PUT",
       body: JSON.stringify({
         message: `ProEngram: ${input.title}`,
@@ -449,20 +575,21 @@ export async function createMarkdownPullRequest(input: {
       }),
     });
     const pullRequest = await githubJson<{ html_url?: string; number?: number }>(
-      apiPath(settings, "/pulls"),
+      apiPath(source, "/pulls"),
       token,
       {
         method: "POST",
         body: JSON.stringify({
           title: input.title.slice(0, 240),
           head: proposalBranch,
-          base: settings.defaultBranch,
+          base: source.defaultBranch,
           body: `${input.summary.slice(0, 4000)}\n\nProposed by ProEngram for Perminister user ${input.subjectId}.`,
         }),
       },
     );
-    if (!pullRequest.html_url || !pullRequest.number)
+    if (!pullRequest.html_url || !pullRequest.number) {
       throw new Error("GitHub did not return the pull request URL.");
+    }
     result = { url: pullRequest.html_url, number: pullRequest.number, branch: proposalBranch };
   } catch (error) {
     await pool
@@ -474,6 +601,7 @@ export async function createMarkdownPullRequest(input: {
           `GitHub proposal failed for ${input.path}.`,
           JSON.stringify({
             status: "failed",
+            sourceId: source.id,
             path: input.path,
             error: error instanceof Error ? error.message.slice(0, 400) : "GitHub request failed.",
           }),
@@ -493,6 +621,7 @@ export async function createMarkdownPullRequest(input: {
         `Opened GitHub PR #${result.number}: ${input.title}`,
         JSON.stringify({
           status: "succeeded",
+          sourceId: source.id,
           path: input.path,
           pullRequestUrl: result.url,
         }),
@@ -500,11 +629,10 @@ export async function createMarkdownPullRequest(input: {
       ],
     )
     .catch(() => {
-      // The pending audit row remains if GitHub succeeded but this final update fails.
       console.error(
         "ProEngram could not mark a completed GitHub proposal in the activity log.",
         activityId,
       );
     });
-  return result;
+  return { ...result, sourceId: source.id, repository: `${source.owner}/${source.repository}` };
 }

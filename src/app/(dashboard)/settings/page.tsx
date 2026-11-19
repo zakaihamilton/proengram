@@ -1,70 +1,104 @@
 import Link from "next/link";
 import { Alert, Badge, Card, PageHeader } from "panel-frame-ui";
-import { requireDashboardIdentity } from "@/lib/auth/session";
-import { getMcpResourceUri, getPerministerBaseUrl } from "@/lib/auth/config";
+import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
+import { getMcpResourceUri, getPerministerBaseUrl, getPublicOrigin } from "@/lib/auth/config";
 import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
 import { isDatabaseConfigured } from "@/lib/db/pool";
-import { getGitHubRepositorySettings, isGitHubConfigured } from "@/lib/github/github";
-import { configureGitHubAction, syncGitHubAction } from "./actions";
+import { isGitHubConfigured, listGitHubRepositorySources } from "@/lib/github/github";
+import { listGitHubAccountConnections } from "@/lib/github/connections";
+import {
+  addGitHubRepositoryAction,
+  removeGitHubAccountAction,
+  removeGitHubRepositoryAction,
+  syncGitHubAction,
+} from "./actions";
 
 function Status({ ready }: { ready: boolean }) {
   return <Badge tone={ready ? "success" : "warning"}>{ready ? "Configured" : "Needs setup"}</Badge>;
 }
 
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    github?: string | string[];
-    githubSettings?: string | string[];
-    count?: string | string[];
-  }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const identity = await requireDashboardIdentity("brain:read");
   const params = await searchParams;
-  const githubState = Array.isArray(params.github) ? params.github[0] : params.github;
-  const githubSettingsState = Array.isArray(params.githubSettings)
-    ? params.githubSettings[0]
-    : params.githubSettings;
-  const count = Array.isArray(params.count) ? params.count[0] : params.count;
+  const canManageSources = await authorizeAppAction(identity, "source:manage").catch(() => false);
+  const canSyncSources = await authorizeAppAction(identity, "source:sync").catch(() => false);
   const dashboardAuthReady = Boolean(
     process.env.PERMINISTER_DASHBOARD_CLIENT_ID && process.env.PERMINISTER_DASHBOARD_CLIENT_SECRET,
   );
   const mcpAuthReady = Boolean(
     process.env.PERMINISTER_MCP_CLIENT_ID && process.env.PERMINISTER_MCP_CLIENT_SECRET,
   );
-  const githubAppReady = isGitHubConfigured();
+  const githubOAuthReady = isGitHubConfigured();
   const databaseReady = isDatabaseConfigured();
-  const githubRepository = databaseReady
-    ? await getGitHubRepositorySettings(identity.organization.organizationId).catch(() => null)
-    : null;
-  const githubReady = githubAppReady && Boolean(githubRepository);
+  const githubAccounts = databaseReady
+    ? await listGitHubAccountConnections(identity.organization.organizationId).catch(() => [])
+    : [];
+  const githubSources = databaseReady
+    ? await listGitHubRepositorySources(identity.organization.organizationId).catch(() => [])
+    : [];
+  const activeSources = githubSources.filter((source) => source.status === "active");
+  const connected = githubOAuthReady && activeSources.length > 0;
   const mcpUrl = getMcpResourceUri();
+  const githubState = first(params.github);
+  const githubConnectionState = first(params.githubConnection);
+  const githubRepositoryState = first(params.githubRepository);
+  const githubAccountState = first(params.githubAccount);
+  const count = first(params.count);
+  const githubCallbackUrl = new URL("/auth/github/callback", getPublicOrigin()).toString();
 
   return (
     <main className="page-content">
       <PageHeader
         eyebrow="WORKSPACE CONFIGURATION"
         title="Settings"
-        description="Connection status and setup guidance. Secrets are never displayed in the dashboard."
+        description="Manage connections for this organization. Secrets stay server-side."
       />
       {githubState === "synced" ? (
         <Alert tone="success">Synced {count || "the"} Markdown files from GitHub.</Alert>
       ) : null}
       {githubState === "error" ? (
         <Alert tone="error">
-          GitHub sync failed. Check the App installation, repository permissions, and Nanogres
-          database.
+          GitHub sync failed. Reconnect the account or check repository permissions.
         </Alert>
       ) : null}
-      {githubSettingsState === "saved" ? (
-        <Alert tone="success">GitHub repository saved for {identity.organization.name}.</Alert>
+      {githubConnectionState === "connected" ? (
+        <Alert tone="success">GitHub account connected to {identity.organization.name}.</Alert>
       ) : null}
-      {githubSettingsState === "error" ? (
+      {githubConnectionState === "denied" ? (
+        <Alert tone="warning">GitHub account authorization was cancelled.</Alert>
+      ) : null}
+      {githubConnectionState === "setup" || githubConnectionState === "error" ? (
         <Alert tone="error">
-          GitHub repository settings could not be saved. Verify the installation, repository, and
-          branch, then try again.
+          GitHub OAuth is not ready. Configure the GitHub App client ID and secret plus the token
+          encryption key, then try again.
         </Alert>
+      ) : null}
+      {githubRepositoryState === "added" ? (
+        <Alert tone="success">GitHub repository connected to this organization.</Alert>
+      ) : null}
+      {githubRepositoryState === "removed" ? (
+        <Alert tone="success">
+          GitHub repository disconnected. Its indexed documents are inactive.
+        </Alert>
+      ) : null}
+      {githubRepositoryState === "error" ? (
+        <Alert tone="error">
+          Repository could not be changed. Check the account's access and repository name.
+        </Alert>
+      ) : null}
+      {githubAccountState === "removed" ? (
+        <Alert tone="success">GitHub account disconnected from this organization.</Alert>
+      ) : null}
+      {githubAccountState === "error" ? (
+        <Alert tone="error">GitHub account could not be disconnected.</Alert>
       ) : null}
 
       <div className="connection-grid">
@@ -76,12 +110,7 @@ export default async function SettingsPage({
             the exact callback URL.
           </p>
           <p className="connection-status">
-            <code>
-              {new URL(
-                "/auth/perminister/callback",
-                process.env.PROENGRAM_ORIGIN || "http://localhost:3000",
-              ).toString()}
-            </code>
+            <code>{new URL("/auth/perminister/callback", getPublicOrigin()).toString()}</code>
           </p>
         </Card>
         <Card className="connection-card">
@@ -106,80 +135,156 @@ export default async function SettingsPage({
             {databaseReady ? "Workload identity configured" : "Set Nanogres identity settings"}
           </p>
         </Card>
+
         <Card className="connection-card">
-          <Status ready={githubReady} />
-          <h2>GitHub Markdown for {identity.organization.name}</h2>
+          <Badge tone={connected ? "success" : "warning"}>
+            {connected ? "Connected" : githubOAuthReady ? "No repositories yet" : "Needs setup"}
+          </Badge>
+          <h2>GitHub sources for {identity.organization.name}</h2>
           <p>
-            Connect this organization to its own GitHub App installation and repository. ProEngram
-            reads Markdown and opens reviewable pull requests there.
+            Connect GitHub user accounts, then choose repositories the account can access. Each
+            organization keeps its own account and repository connections.
           </p>
           <p className="connection-status">
-            {githubRepository
-              ? `${githubRepository.owner}/${githubRepository.repository} · ${githubRepository.defaultBranch}`
-              : githubAppReady
-                ? "No repository is connected for this organization"
-                : "Set the GitHub App ID and private key"}
+            {githubOAuthReady
+              ? `${githubAccounts.length} account${githubAccounts.length === 1 ? "" : "s"} · ${activeSources.length} active ${activeSources.length === 1 ? "repository" : "repositories"}`
+              : "Set the GitHub App OAuth credentials and token encryption key"}
           </p>
-          {githubAppReady && databaseReady ? (
-            <>
-              <form action={configureGitHubAction} className="save-form connection-action">
-                <label className="pf-field">
-                  <span className="pf-field-label">GitHub App installation ID</span>
-                  <input
-                    className="pf-input"
-                    inputMode="numeric"
-                    name="installationId"
-                    placeholder="12345678"
-                    required
-                    defaultValue={githubRepository?.installationId ?? ""}
-                  />
-                </label>
-                <label className="pf-field">
-                  <span className="pf-field-label">Repository owner</span>
-                  <input
-                    className="pf-input"
-                    name="owner"
-                    placeholder="company"
-                    required
-                    defaultValue={githubRepository?.owner ?? ""}
-                  />
-                </label>
-                <label className="pf-field">
-                  <span className="pf-field-label">Repository name</span>
-                  <input
-                    className="pf-input"
-                    name="repository"
-                    placeholder="knowledge"
-                    required
-                    defaultValue={githubRepository?.repository ?? ""}
-                  />
-                </label>
-                <label className="pf-field">
-                  <span className="pf-field-label">Default branch</span>
-                  <input
-                    className="pf-input"
-                    name="defaultBranch"
-                    placeholder="main"
-                    required
-                    defaultValue={githubRepository?.defaultBranch ?? "main"}
-                  />
-                </label>
-                <button className="pf-button pf-button-secondary" type="submit">
-                  Save repository
-                </button>
-              </form>
-              <form action={syncGitHubAction} className="connection-action">
-                <button
-                  className="pf-button pf-button-secondary"
-                  disabled={!githubReady}
-                  type="submit"
-                >
-                  Sync Markdown
-                </button>
-              </form>
-            </>
+
+          {canManageSources && githubOAuthReady && databaseReady ? (
+            <form
+              action="/auth/github/connect"
+              className="save-form connection-action"
+              method="get"
+            >
+              <label className="pf-field">
+                <span className="pf-field-label">GitHub username (optional)</span>
+                <input className="pf-input" name="login" placeholder="octocat" />
+              </label>
+              <button className="pf-button pf-button-secondary" type="submit">
+                Connect or add account
+              </button>
+            </form>
+          ) : null}
+
+          {githubAccounts.length ? (
+            <div className="connection-action">
+              <h3>Connected accounts</h3>
+              <div className="status-list">
+                {githubAccounts.map((account) => (
+                  <div className="status-row" key={account.id}>
+                    <span>
+                      <strong>@{account.login}</strong>
+                      <span className="metric-note">
+                        {account.repositoryCount} connected repositor
+                        {account.repositoryCount === 1 ? "y" : "ies"}
+                      </span>
+                    </span>
+                    <div className="connection-row-actions">
+                      <Badge tone={account.status === "active" ? "success" : "warning"}>
+                        {account.status === "active" ? "Connected" : "Reconnect needed"}
+                      </Badge>
+                      {canManageSources && account.status !== "active" ? (
+                        <Link
+                          className="text-link"
+                          href={`/auth/github/connect?login=${encodeURIComponent(account.login)}`}
+                        >
+                          Reconnect
+                        </Link>
+                      ) : null}
+                      {canManageSources ? (
+                        <form action={removeGitHubAccountAction}>
+                          <input name="organizationAccountId" type="hidden" value={account.id} />
+                          <button className="text-link" type="submit">
+                            Remove
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {canManageSources &&
+          githubOAuthReady &&
+          databaseReady &&
+          githubAccounts.some((account) => account.status === "active") ? (
+            <form action={addGitHubRepositoryAction} className="save-form connection-action">
+              <h3>Add a repository</h3>
+              <label className="pf-field">
+                <span className="pf-field-label">GitHub account</span>
+                <select className="pf-input" name="organizationAccountId" required>
+                  {githubAccounts
+                    .filter((account) => account.status === "active")
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        @{account.login}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="pf-field">
+                <span className="pf-field-label">Repository owner</span>
+                <input className="pf-input" name="owner" placeholder="company" required />
+              </label>
+              <label className="pf-field">
+                <span className="pf-field-label">Repository name</span>
+                <input className="pf-input" name="repository" placeholder="knowledge" required />
+              </label>
+              <button className="pf-button pf-button-secondary" type="submit">
+                Add repository
+              </button>
+            </form>
+          ) : null}
+
+          {githubSources.length ? (
+            <div className="connection-action">
+              <h3>Repositories</h3>
+              <div className="status-list">
+                {githubSources.map((source) => (
+                  <div className="status-row" key={source.id}>
+                    <span>
+                      <strong>
+                        {source.owner}/{source.repository}
+                      </strong>
+                      <span className="metric-note">
+                        {source.githubLogin ? `@${source.githubLogin} · ` : ""}
+                        {source.defaultBranch}
+                        {source.lastSyncedAt
+                          ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
+                          : ""}
+                      </span>
+                    </span>
+                    <div className="connection-row-actions">
+                      <Badge tone={source.status === "active" ? "success" : "warning"}>
+                        {source.status === "active" ? "Active" : "Reconnect account"}
+                      </Badge>
+                      {source.status === "active" && canSyncSources ? (
+                        <form action={syncGitHubAction}>
+                          <input name="sourceId" type="hidden" value={source.id} />
+                          <button className="text-link" type="submit">
+                            Sync
+                          </button>
+                        </form>
+                      ) : null}
+                      {canManageSources ? (
+                        <form action={removeGitHubRepositoryAction}>
+                          <input name="sourceId" type="hidden" value={source.id} />
+                          <button className="text-link" type="submit">
+                            Remove
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : null}
         </Card>
+
         <Card className="connection-card">
           <Badge tone="warning">Adapter required</Badge>
           <h2>Sentry8 policy snapshots</h2>
@@ -227,11 +332,16 @@ export default async function SettingsPage({
             introspection.
           </li>
           <li>
-            Set the GitHub App permissions for repository contents and pull requests, then connect a
-            repository for each organization in Settings.
+            Configure the GitHub App callback URL <code>{githubCallbackUrl}</code>, repository
+            Contents read/write and Pull requests read/write permissions, plus the server-side
+            client ID, client secret, and 32-byte token encryption key.
           </li>
           <li>
-            Apply the numbered database migrations with <code>pnpm db:migrate</code>.
+            Give each GitHub account access to the app installation and repositories it will
+            connect.
+          </li>
+          <li>
+            Apply numbered database migrations with <code>pnpm db:migrate</code>.
           </li>
           <li>
             Run <code>pnpm health:audit</code> and review the available Repnix guardrails.

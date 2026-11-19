@@ -33,13 +33,22 @@ Copy `.env.example` to `.env.local` and enter the local client IDs and secrets t
 
 The MCP endpoint is `/mcp`. Protected Resource Metadata is published at the RFC 9728 path for that exact resource URL (for example, `/.well-known/oauth-protected-resource/mcp`). ChatGPT and Claude discover Perminister there and obtain a separate user token for the ProEngram resource.
 
-The dashboard stores its active organization in a browser cookie. MCP calls are stateless and do not use that cookie: call `list_organizations`, then pass the chosen `organizationId` to `search_knowledge`, `get_document`, `get_policy`, `save_result`, and `propose_markdown_change` when the account has multiple organizations. The ID may be omitted when the account has exactly one. Perminister checks the current grant for the selected organization and action.
+The dashboard stores its active organization in a browser cookie. MCP calls are stateless and do not use that cookie: call `list_organizations`, then pass the chosen `organizationId` to `search_knowledge`, `get_document`, `get_policy`, `save_result`, `list_github_sources`, and `propose_markdown_change` when the account has multiple organizations. The ID may be omitted when the account has exactly one. Perminister checks the current grant for the selected organization and action. Use `list_github_sources` to select a `sourceId` for a proposal when an organization has multiple repositories.
 
 ## GitHub setup
 
-Configure one GitHub App ID and private key in the environment. Install that app on each organization's knowledge repository and grant Contents read/write and Pull Requests read/write permissions. In each ProEngram organization's Settings page, enter that installation ID, repository owner, repository name, and default branch. ProEngram checks that the installation can access the repository and branch before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. Proposed edits stay in the selected organization's repository and create reviewable pull requests under `docs/`.
+Create a GitHub App with the OAuth user authorization flow enabled, an expiring user token, and this callback URL for each environment:
 
-For an existing single-organization deployment, keep `PERMINISTER_ORGANIZATION_ID`, `GITHUB_INSTALLATION_ID`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, and `GITHUB_DEFAULT_BRANCH` configured for the first `pnpm db:migrate` after upgrading. The migration copies the GitHub target into that organization's settings if no record exists. Then remove those legacy variables; retain only `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` at deployment level.
+| Environment | GitHub App callback |
+| --- | --- |
+| Local | `http://localhost:3000/auth/github/callback` |
+| Production | `https://proengram.vercel.app/auth/github/callback` |
+
+Grant the App Contents read/write and Pull requests read/write repository permissions, and install it on the repositories ProEngram should use. Configure `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and `GITHUB_TOKEN_ENCRYPTION_KEY` in each environment. The encryption key must be 32 random bytes encoded as hex or base64; keep it separate per environment and retain it while encrypted tokens exist. ProEngram encrypts user access and refresh tokens in Nanogres and refreshes them server-side. It does not need a GitHub App private key.
+
+An organization admin connects one or more GitHub user accounts in that organization's Settings page, then adds repositories those accounts can access. Accounts and repositories are scoped to the ProEngram organization; admins can remove either at any time. The account must have access to the GitHub App installation and selected repository. ProEngram checks repository access before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. `propose_markdown_change` creates reviewable pull requests under `docs/` in the selected repository and never merges them automatically.
+
+For an existing single-organization deployment, retain `PERMINISTER_ORGANIZATION_ID`, `GITHUB_INSTALLATION_ID`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, and `GITHUB_DEFAULT_BRANCH` through the first `pnpm db:migrate` after upgrading if those values were previously used for migration backfill. The migration carries the old repository target into the new source table as needing authorization; an admin then reconnects a GitHub account and selects the repository in Settings. Remove the legacy variables afterward.
 
 ## Database and migrations
 

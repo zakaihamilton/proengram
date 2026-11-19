@@ -209,29 +209,30 @@ try {
     .filter((file) => /^\d+_[a-z0-9_-]+\.sql$/i.test(file))
     .sort();
   for (const file of migrationFiles) {
+    if (file === "003_github_user_connections.sql") {
+      const legacyOrganizationId = process.env.PERMINISTER_ORGANIZATION_ID?.trim().toLowerCase();
+      const legacyInstallationId = process.env.GITHUB_INSTALLATION_ID?.trim();
+      const legacyOwner = process.env.GITHUB_REPO_OWNER?.trim();
+      const legacyRepository = process.env.GITHUB_REPO_NAME?.trim();
+      if (legacyOrganizationId && legacyInstallationId && legacyOwner && legacyRepository) {
+        await client.query(
+          `INSERT INTO github_repository_settings
+            (organization_id, installation_id, repository_owner, repository_name, default_branch)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (organization_id) DO NOTHING`,
+          [
+            legacyOrganizationId,
+            legacyInstallationId,
+            legacyOwner,
+            legacyRepository,
+            process.env.GITHUB_DEFAULT_BRANCH?.trim() || "main",
+          ],
+        );
+        console.log("Backfilled the legacy GitHub repository before migrating its connection.");
+      }
+    }
     await client.query(await readFile(resolve(migrationDirectory, file), "utf8"));
     console.log(`Applied db/migrations/${file}`);
-  }
-
-  const legacyOrganizationId = process.env.PERMINISTER_ORGANIZATION_ID?.trim().toLowerCase();
-  const legacyInstallationId = process.env.GITHUB_INSTALLATION_ID?.trim();
-  const legacyOwner = process.env.GITHUB_REPO_OWNER?.trim();
-  const legacyRepository = process.env.GITHUB_REPO_NAME?.trim();
-  if (legacyOrganizationId && legacyInstallationId && legacyOwner && legacyRepository) {
-    await client.query(
-      `INSERT INTO github_repository_settings
-        (organization_id, installation_id, repository_owner, repository_name, default_branch)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (organization_id) DO NOTHING`,
-      [
-        legacyOrganizationId,
-        legacyInstallationId,
-        legacyOwner,
-        legacyRepository,
-        process.env.GITHUB_DEFAULT_BRANCH?.trim() || "main",
-      ],
-    );
-    console.log("Backfilled the legacy GitHub repository for its ProEngram organization.");
   }
 } finally {
   try {

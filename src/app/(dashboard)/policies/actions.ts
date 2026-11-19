@@ -84,7 +84,9 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
         `INSERT INTO brain_items
           (id, organization_id, kind, external_key, title, markdown, source_revision, is_active)
          VALUES ($1, $2, 'sentry8_policy', $3, $4, $5, $6, true)
-         ON CONFLICT (organization_id, kind, external_key) DO UPDATE SET
+         ON CONFLICT (organization_id, kind, external_key)
+           WHERE kind <> 'github_markdown'
+         DO UPDATE SET
            title = EXCLUDED.title,
            markdown = EXCLUDED.markdown,
            source_revision = EXCLUDED.source_revision,

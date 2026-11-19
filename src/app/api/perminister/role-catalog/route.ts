@@ -34,6 +34,7 @@ export async function GET() {
             "policy:read",
             "result:save",
             "knowledge:propose",
+            "source:manage",
             "source:sync",
           ],
         },
