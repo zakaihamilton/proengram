@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, Card, PageHeader } from "panel-frame-ui";
+import { MarkdownContent } from "@/components/markdown-content";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
 import { getBrainItem } from "@/lib/db/brain";
 import { formatDate } from "@/lib/date";
@@ -48,7 +49,7 @@ export default async function KnowledgeItemPage({ params }: { params: Promise<{ 
             {labels[item.kind]}
           </Badge>
           <article className="result-body" style={{ marginTop: 20 }}>
-            {item.markdown}
+            <MarkdownContent markdown={item.markdown} />
           </article>
         </Card>
         <Card className="content-card">

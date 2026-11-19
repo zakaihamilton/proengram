@@ -249,7 +249,10 @@ export async function claimGitHubSyncJob(jobId?: string): Promise<GitHubSyncJob 
   }
 }
 
-export async function completeGitHubSyncJob(jobId: string, processedHeadSha: string): Promise<void> {
+export async function completeGitHubSyncJob(
+  jobId: string,
+  processedHeadSha: string,
+): Promise<void> {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
   await pool.query(

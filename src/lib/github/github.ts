@@ -5,12 +5,8 @@ import { getPublicOrigin } from "@/lib/auth/config";
 import { getPool } from "@/lib/db/pool";
 import { writeActivity } from "@/lib/db/brain";
 import { getGitHubAccessToken, isGitHubConfigured } from "./connections";
-import { enqueueGitHubSyncJob } from "./sync-jobs";
 import { decryptGitHubToken, encryptGitHubToken } from "./token-crypto";
-import {
-  createGitHubRepositoryWebhook,
-  deleteGitHubRepositoryWebhook,
-} from "./webhook-api";
+import { createGitHubRepositoryWebhook, deleteGitHubRepositoryWebhook } from "./webhook-api";
 
 export { isGitHubConfigured } from "./connections";
 
@@ -319,7 +315,7 @@ export async function listGitHubWebhookSources(hookId: string): Promise<GitHubWe
 export async function ensureGitHubRepositoryWebhook(
   organizationId: string,
   sourceId: string,
-  subjectId: string,
+  _subjectId: string,
 ): Promise<boolean> {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
@@ -419,7 +415,11 @@ export async function ensureGitHubRepositoryWebhook(
       await client.query("COMMIT");
       return false;
     }
-    if (source.webhook_id && source.webhook_secret_ciphertext && source.webhook_status === "active") {
+    if (
+      source.webhook_id &&
+      source.webhook_secret_ciphertext &&
+      source.webhook_status === "active"
+    ) {
       await client.query("COMMIT");
       return true;
     }
@@ -496,7 +496,8 @@ export async function ensureGitHubRepositoryWebhook(
     return true;
   } catch (error) {
     if (transaction) {
-      const message = error instanceof Error ? error.message.slice(0, 300) : "Webhook setup failed.";
+      const message =
+        error instanceof Error ? error.message.slice(0, 300) : "Webhook setup failed.";
       await client
         .query(
           `UPDATE github_repository_sources
@@ -507,7 +508,10 @@ export async function ensureGitHubRepositoryWebhook(
           [organizationId, sourceId, message],
         )
         .catch(() => undefined);
-      await client.query("COMMIT").catch(() => client.query("ROLLBACK")).catch(() => undefined);
+      await client
+        .query("COMMIT")
+        .catch(() => client.query("ROLLBACK"))
+        .catch(() => undefined);
     }
     console.error("GitHub repository webhook setup failed.");
     return false;
@@ -516,10 +520,17 @@ export async function ensureGitHubRepositoryWebhook(
   }
 }
 
-export async function repairGitHubRepositoryWebhooks(): Promise<{ checked: number; active: number }> {
+export async function repairGitHubRepositoryWebhooks(): Promise<{
+  checked: number;
+  active: number;
+}> {
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const result = await pool.query<{ organization_id: string; source_id: string; actor_subject_id: string }>(
+  const result = await pool.query<{
+    organization_id: string;
+    source_id: string;
+    actor_subject_id: string;
+  }>(
     `SELECT source.organization_id,
             source.id AS source_id,
             COALESCE(source.updated_by_subject_id, link.connected_by_subject_id, 'system:github-sync')
@@ -826,7 +837,7 @@ export async function syncGitHubMarkdown(
   const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
   const source = await getRepositorySource(organizationId, sourceId);
-  if (!source || !source.organizationAccountId) {
+  if (!source?.organizationAccountId) {
     throw new Error("Reconnect this GitHub repository in Settings before syncing.");
   }
   const syncId = randomUUID();
