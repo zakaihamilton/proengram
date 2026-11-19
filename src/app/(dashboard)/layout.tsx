@@ -8,7 +8,11 @@ export default async function DashboardLayout({
   return (
     <AppShell
       email={identity.email}
-      organizationName={identity.organization.name}
+      organizationId={identity.organization.organizationId}
+      organizations={identity.organizations.map(({ organizationId, name }) => ({
+        organizationId,
+        name,
+      }))}
       userName={identity.name}
     >
       {children}

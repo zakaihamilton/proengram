@@ -4,7 +4,12 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { authorizeMcpAction, McpAuthError, type McpPrincipal } from "@/lib/auth/mcp";
+import {
+  authorizeMcpAction,
+  McpAuthError,
+  resolveMcpOrganization,
+  type McpPrincipal,
+} from "@/lib/auth/mcp";
 import { createMarkdownPullRequest, isGitHubConfigured } from "@/lib/github/github";
 import {
   getBrainItem,
@@ -41,9 +46,13 @@ async function withToolErrors<T>(operation: () => Promise<T>) {
   }
 }
 
-async function canAuthorizeMcpAction(principal: McpPrincipal, action: string): Promise<boolean> {
+async function canAuthorizeMcpAction(
+  principal: McpPrincipal,
+  action: string,
+  organizationId: string,
+): Promise<boolean> {
   try {
-    await authorizeMcpAction(principal, action);
+    await authorizeMcpAction(principal, action, organizationId);
     return true;
   } catch (error) {
     if (error instanceof McpAuthError && (error.status === 403 || error.status === 503))
@@ -53,22 +62,38 @@ async function canAuthorizeMcpAction(principal: McpPrincipal, action: string): P
 }
 
 function requireDatabase(): void {
-  if (!isDatabaseConfigured() || !getPool())
-    throw new Error("Nanogres PostgreSQL is not configured.");
+  if (!isDatabaseConfigured()) throw new Error("Nanogres PostgreSQL is not configured.");
 }
 
 function createServer(principal: McpPrincipal): McpServer {
   const server = new McpServer({ name: "ProEngram", version: "0.1.0" });
 
   server.registerTool(
+    "list_organizations",
+    {
+      title: "List ProEngram organizations",
+      description: "List the ProEngram organizations available to your Perminister account.",
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async () => textResult(principal.organizations),
+  );
+
+  server.registerTool(
     "search_knowledge",
     {
       title: "Search company knowledge",
       description:
-        "Search approved GitHub Markdown, company-saved answers, and imported Sentry8 policy snapshots.",
+        "Search approved GitHub Markdown, company-saved answers, and imported Sentry8 policy snapshots. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         query: z.string().trim().min(1).max(500),
         limit: z.number().int().min(1).max(20).optional(),
+        organizationId: z.string().trim().min(1).max(128).optional(),
       },
       annotations: {
         readOnlyHint: true,
@@ -77,25 +102,30 @@ function createServer(principal: McpPrincipal): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ query, limit }) =>
+    async ({ query, limit, organizationId }) =>
       withToolErrors(async () => {
-        await authorizeMcpAction(principal, "brain:read");
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "brain:read", organization.organizationId);
         requireDatabase();
-        const canReadPolicies = await canAuthorizeMcpAction(principal, "policy:read");
+        const canReadPolicies = await canAuthorizeMcpAction(
+          principal,
+          "policy:read",
+          organization.organizationId,
+        );
         const items = await searchBrainItems(
-          principal.organizationId,
+          organization.organizationId,
           query,
           limit ?? 8,
           canReadPolicies ? undefined : "sentry8_policy",
         );
-        const pool = getPool();
+        const pool = await getPool();
         if (pool) {
           await pool.query(
             `INSERT INTO activity_events (id, organization_id, actor_subject_id, action, summary, metadata)
            VALUES ($1, $2, $3, 'brain:search', 'Searched company knowledge.', $4::jsonb)`,
             [
               randomUUID(),
-              principal.organizationId,
+              organization.organizationId,
               principal.subjectId,
               JSON.stringify({ resultCount: items.length }),
             ],
@@ -120,8 +150,11 @@ function createServer(principal: McpPrincipal): McpServer {
     {
       title: "Read a company knowledge item",
       description:
-        "Fetch one result returned by search_knowledge, including its source and revision.",
-      inputSchema: { id: z.string().uuid() },
+        "Fetch one result returned by search_knowledge, including its source and revision. Pass organizationId when your account has multiple ProEngram organizations.",
+      inputSchema: {
+        id: z.string().uuid(),
+        organizationId: z.string().trim().min(1).max(128).optional(),
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -129,13 +162,18 @@ function createServer(principal: McpPrincipal): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ id }) =>
+    async ({ id, organizationId }) =>
       withToolErrors(async () => {
-        await authorizeMcpAction(principal, "brain:read");
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "brain:read", organization.organizationId);
         requireDatabase();
-        const canReadPolicies = await canAuthorizeMcpAction(principal, "policy:read");
+        const canReadPolicies = await canAuthorizeMcpAction(
+          principal,
+          "policy:read",
+          organization.organizationId,
+        );
         const item = await getBrainItem(
-          principal.organizationId,
+          organization.organizationId,
           id,
           canReadPolicies ? undefined : "sentry8_policy",
         );
@@ -148,8 +186,12 @@ function createServer(principal: McpPrincipal): McpServer {
     "get_policy",
     {
       title: "Find a Sentry8 policy",
-      description: "Search policy snapshots imported from the configured Sentry8 source.",
-      inputSchema: { query: z.string().trim().min(1).max(500).optional() },
+      description:
+        "Search policy snapshots imported from the configured Sentry8 source. Pass organizationId when your account has multiple ProEngram organizations.",
+      inputSchema: {
+        query: z.string().trim().min(1).max(500).optional(),
+        organizationId: z.string().trim().min(1).max(128).optional(),
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -157,13 +199,14 @@ function createServer(principal: McpPrincipal): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ query }) =>
+    async ({ query, organizationId }) =>
       withToolErrors(async () => {
-        await authorizeMcpAction(principal, "policy:read");
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "policy:read", organization.organizationId);
         requireDatabase();
         const policies = query
-          ? await searchBrainItemsByKind(principal.organizationId, "sentry8_policy", query, 20)
-          : await listItemsByKind(principal.organizationId, "sentry8_policy", 20);
+          ? await searchBrainItemsByKind(organization.organizationId, "sentry8_policy", query, 20)
+          : await listItemsByKind(organization.organizationId, "sentry8_policy", 20);
         if (policies.length === 0) {
           return textResult(
             "No Sentry8 policy catalog has been imported into ProEngram yet.",
@@ -187,10 +230,11 @@ function createServer(principal: McpPrincipal): McpServer {
     {
       title: "Save a shared answer",
       description:
-        "Explicitly save an answer and its citations for everyone in this company workspace.",
+        "Explicitly save an answer and its citations for everyone in this company workspace. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         title: z.string().trim().min(1).max(240),
         markdown: z.string().trim().min(1).max(30_000),
+        organizationId: z.string().trim().min(1).max(128).optional(),
         citations: z
           .array(
             z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }),
@@ -205,12 +249,13 @@ function createServer(principal: McpPrincipal): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ title, markdown, citations }) =>
+    async ({ title, markdown, citations, organizationId }) =>
       withToolErrors(async () => {
-        await authorizeMcpAction(principal, "result:save");
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "result:save", organization.organizationId);
         requireDatabase();
         const item = await saveResult({
-          organizationId: principal.organizationId,
+          organizationId: organization.organizationId,
           subjectId: principal.subjectId,
           title,
           markdown,
@@ -231,12 +276,13 @@ function createServer(principal: McpPrincipal): McpServer {
     {
       title: "Propose a knowledge edit",
       description:
-        "Create a GitHub pull request for a Markdown file in docs/. The proposal is not merged automatically.",
+        "Create a GitHub pull request for a Markdown file in docs/. The proposal is not merged automatically. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         path: z.string().trim().min(6).max(300),
         title: z.string().trim().min(1).max(240),
         markdown: z.string().min(1).max(300_000),
         summary: z.string().trim().min(1).max(4000),
+        organizationId: z.string().trim().min(1).max(128).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -245,12 +291,13 @@ function createServer(principal: McpPrincipal): McpServer {
         openWorldHint: true,
       },
     },
-    async ({ path, title, markdown, summary }) =>
+    async ({ path, title, markdown, summary, organizationId }) =>
       withToolErrors(async () => {
-        await authorizeMcpAction(principal, "knowledge:propose");
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "knowledge:propose", organization.organizationId);
         if (!isGitHubConfigured()) throw new Error("The ProEngram GitHub App is not configured.");
         const proposal = await createMarkdownPullRequest({
-          organizationId: principal.organizationId,
+          organizationId: organization.organizationId,
           subjectId: principal.subjectId,
           path,
           title,

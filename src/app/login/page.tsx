@@ -9,7 +9,8 @@ const errorCopy: Record<string, string> = {
   state: "The sign-in request expired or could not be verified. Please try again.",
   issuer: "The identity provider did not match the expected Perminister issuer.",
   missing_code: "Perminister did not return a sign-in code. Please try again.",
-  access_denied: "Your account does not have access to this ProEngram workspace.",
+  access_denied:
+    "Your Perminister account has no ProEngram organization with the brain:read permission. Grant this account ProEngram read access in Perminister, then try again.",
   sign_in_failed: "Sign-in could not be completed. Please try again.",
 };
 

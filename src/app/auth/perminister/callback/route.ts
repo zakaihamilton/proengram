@@ -7,7 +7,7 @@ import {
   validateDashboardIdToken,
 } from "@/lib/auth/perminister";
 import { decodeOAuthState } from "@/lib/auth/oauth-state";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { getDashboardIdentityForAccessToken, SESSION_COOKIE } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -43,6 +43,8 @@ export async function GET(request: Request): Promise<Response> {
     if (issuer && issuer !== metadata.issuer) return loginRedirect("issuer");
     const session = await exchangeDashboardCode(code, state.verifier);
     await validateDashboardIdToken(session.idToken, state.nonce);
+    const identity = await getDashboardIdentityForAccessToken(session.accessToken);
+    if (!identity) return loginRedirect("access_denied");
     jar.set(SESSION_COOKIE, session.accessToken, {
       httpOnly: true,
       secure: isCookieSecure(),

@@ -66,7 +66,7 @@ export default async function KnowledgePage({
       {!isDatabaseConfigured() ? (
         <EmptyState
           title="Connect the shared library"
-          description="Set DATABASE_URL to a ProEngram database in Nanogres, then apply the initial migration."
+          description="Configure this environment's Nanogres workload identity, then apply the initial migration."
           action={
             <Link className="text-link" href="/settings">
               Open settings

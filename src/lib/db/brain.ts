@@ -48,7 +48,7 @@ async function searchItems(
   kind?: BrainItemKind,
   excludeKind?: BrainItemKind,
 ): Promise<BrainItem[]> {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return [];
   const values: unknown[] = [organizationId];
   const filters = ["organization_id = $1", "visibility = 'company'", "is_active = true"];
@@ -103,7 +103,7 @@ export async function getBrainItem(
   id: string,
   excludeKind?: BrainItemKind,
 ): Promise<BrainItem | null> {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return null;
   const result = await pool.query(
     `SELECT id, kind, title, markdown, source_url, source_revision, owner_subject_id, updated_at, citations
@@ -121,7 +121,7 @@ export async function listItemsByKind(
   kind: BrainItemKind,
   limit = 20,
 ): Promise<BrainItem[]> {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return [];
   const result = await pool.query(
     `SELECT id, kind, title, markdown, source_url, source_revision, owner_subject_id, updated_at, citations
@@ -135,7 +135,7 @@ export async function listItemsByKind(
 }
 
 export async function getOverview(organizationId: string, includePolicies = true) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return null;
   const [counts, recent, syncs] = await Promise.all([
     pool.query<{ kind: string; count: string }>(
@@ -177,7 +177,7 @@ export async function getOverview(organizationId: string, includePolicies = true
 }
 
 export async function listActivity(organizationId: string, limit = 30) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return [];
   const result = await pool.query(
     `SELECT id, actor_subject_id, action, item_kind, item_id, summary, created_at
@@ -203,7 +203,7 @@ export async function saveResult(input: {
   markdown: string;
   citations: Array<{ title: string; url: string }>;
 }): Promise<BrainItem> {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
   const id = randomUUID();
   const client = await pool.connect();

@@ -24,31 +24,43 @@ type GitHubSettings = {
   defaultBranch: string;
 };
 
+export type GitHubRepositorySettings = {
+  installationId: string;
+  owner: string;
+  repository: string;
+  defaultBranch: string;
+};
+
 function setting(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is not configured.`);
   return value;
 }
 
-function getSettings(): GitHubSettings {
-  return {
-    appId: setting("GITHUB_APP_ID"),
-    installationId: setting("GITHUB_INSTALLATION_ID"),
-    privateKey: setting("GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
-    owner: setting("GITHUB_REPO_OWNER"),
-    repository: setting("GITHUB_REPO_NAME"),
-    defaultBranch: process.env.GITHUB_DEFAULT_BRANCH?.trim() || "main",
-  };
+export function isGitHubConfigured(): boolean {
+  return ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"].every((key) =>
+    Boolean(process.env[key]?.trim()),
+  );
 }
 
-export function isGitHubConfigured(): boolean {
-  return [
-    "GITHUB_APP_ID",
-    "GITHUB_INSTALLATION_ID",
-    "GITHUB_APP_PRIVATE_KEY",
-    "GITHUB_REPO_OWNER",
-    "GITHUB_REPO_NAME",
-  ].every((key) => Boolean(process.env[key]?.trim()));
+export async function getGitHubRepositorySettings(
+  organizationId: string,
+): Promise<GitHubRepositorySettings | null> {
+  const pool = await getPool();
+  if (!pool) return null;
+  const result = await pool.query(
+    `SELECT installation_id, repository_owner, repository_name, default_branch
+       FROM github_repository_settings WHERE organization_id = $1 LIMIT 1`,
+    [organizationId],
+  );
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    installationId: String(row.installation_id),
+    owner: String(row.repository_owner),
+    repository: String(row.repository_name),
+    defaultBranch: String(row.default_branch),
+  };
 }
 
 async function createInstallationToken(settings: GitHubSettings): Promise<string> {
@@ -99,6 +111,132 @@ async function githubJson<T>(url: string, token: string, init?: RequestInit): Pr
   return body as T;
 }
 
+async function getSettings(organizationId: string): Promise<GitHubSettings> {
+  if (!isGitHubConfigured()) throw new Error("The ProEngram GitHub App is not configured.");
+  const repository = await getGitHubRepositorySettings(organizationId);
+  if (!repository) {
+    throw new Error(
+      "Connect a GitHub repository for this organization in Settings before syncing.",
+    );
+  }
+  return {
+    appId: setting("GITHUB_APP_ID"),
+    privateKey: setting("GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
+    ...repository,
+  };
+}
+
+function validateRepositoryInput(input: {
+  installationId: string;
+  owner: string;
+  repository: string;
+  defaultBranch: string;
+}): GitHubRepositorySettings {
+  const installationId = input.installationId.trim();
+  const owner = input.owner.trim();
+  const repository = input.repository.trim();
+  const defaultBranch = input.defaultBranch.trim();
+  if (!/^\d{1,20}$/.test(installationId)) {
+    throw new Error("Enter a valid GitHub App installation ID.");
+  }
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner)) {
+    throw new Error("Enter a valid GitHub organization or account name.");
+  }
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repository) || repository === "." || repository === "..") {
+    throw new Error("Enter a valid GitHub repository name.");
+  }
+  if (
+    !defaultBranch ||
+    defaultBranch.length > 255 ||
+    !/^[A-Za-z0-9_./-]+$/.test(defaultBranch) ||
+    defaultBranch.startsWith("/") ||
+    defaultBranch.endsWith("/") ||
+    defaultBranch.includes("..") ||
+    defaultBranch.includes("//")
+  ) {
+    throw new Error("Enter a valid default branch name.");
+  }
+  return { installationId, owner, repository, defaultBranch };
+}
+
+async function validateGitHubRepository(settings: GitHubSettings): Promise<void> {
+  const token = await createInstallationToken(settings);
+  const repository = await githubJson<{ full_name?: string }>(
+    `${API_ROOT}/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repository)}`,
+    token,
+  );
+  if (
+    repository.full_name?.toLowerCase() !== `${settings.owner}/${settings.repository}`.toLowerCase()
+  ) {
+    throw new Error("The selected repository is not available to this GitHub App installation.");
+  }
+  await githubJson(
+    apiPath(settings, `/git/ref/heads/${encodeURIComponent(settings.defaultBranch)}`),
+    token,
+  );
+}
+
+export async function saveGitHubRepositorySettings(input: {
+  organizationId: string;
+  subjectId: string;
+  installationId: string;
+  owner: string;
+  repository: string;
+  defaultBranch: string;
+}): Promise<GitHubRepositorySettings> {
+  if (!isGitHubConfigured()) throw new Error("The ProEngram GitHub App is not configured.");
+  const repository = validateRepositoryInput(input);
+  const settings: GitHubSettings = {
+    appId: setting("GITHUB_APP_ID"),
+    privateKey: setting("GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
+    ...repository,
+  };
+  await validateGitHubRepository(settings);
+
+  const pool = await getPool();
+  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO github_repository_settings
+        (organization_id, installation_id, repository_owner, repository_name, default_branch, updated_by_subject_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (organization_id) DO UPDATE SET
+         installation_id = EXCLUDED.installation_id,
+         repository_owner = EXCLUDED.repository_owner,
+         repository_name = EXCLUDED.repository_name,
+         default_branch = EXCLUDED.default_branch,
+         updated_by_subject_id = EXCLUDED.updated_by_subject_id,
+         updated_at = now()`,
+      [
+        input.organizationId,
+        repository.installationId,
+        repository.owner,
+        repository.repository,
+        repository.defaultBranch,
+        input.subjectId,
+      ],
+    );
+    await writeActivity(client, {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      actorSubjectId: input.subjectId,
+      action: "source:configure",
+      itemKind: "github_markdown",
+      summary: `Connected GitHub source ${repository.owner}/${repository.repository}.`,
+      metadata: { repository: `${repository.owner}/${repository.repository}` },
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return repository;
+}
+
 function apiPath(settings: GitHubSettings, suffix: string): string {
   return `${API_ROOT}/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repository)}${suffix}`;
 }
@@ -118,9 +256,9 @@ function safeMarkdownPath(path: string): boolean {
 }
 
 export async function syncGitHubMarkdown(organizationId: string, subjectId: string) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const settings = getSettings();
+  const settings = await getSettings(organizationId);
   const syncId = randomUUID();
   await pool.query(
     `INSERT INTO source_syncs (id, organization_id, source, status)
@@ -254,7 +392,7 @@ export async function createMarkdownPullRequest(input: {
     throw new Error("Only Markdown files inside docs/ can be proposed.");
   if (Buffer.byteLength(input.markdown, "utf8") > MAX_MARKDOWN_BYTES)
     throw new Error("The proposed Markdown exceeds 300 KB.");
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) throw new Error("Nanogres PostgreSQL is required to audit GitHub proposals.");
   const activityId = randomUUID();
   await pool.query(
@@ -273,7 +411,7 @@ export async function createMarkdownPullRequest(input: {
 
   let result: { url: string; number: number; branch: string };
   try {
-    const settings = getSettings();
+    const settings = await getSettings(input.organizationId);
     const token = await createInstallationToken(settings);
     const baseRef = await githubJson<{ object?: { sha?: string } }>(
       apiPath(settings, `/git/ref/heads/${encodeURIComponent(settings.defaultBranch)}`),

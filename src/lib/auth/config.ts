@@ -34,10 +34,6 @@ export function getPerministerClient(kind: PerministerClientName): PerministerCl
   };
 }
 
-export function getOrganizationId(): string {
-  return required("PERMINISTER_ORGANIZATION_ID").toLowerCase();
-}
-
 export function getMcpResourceUri(): string {
   const value =
     process.env.PERMINISTER_MCP_RESOURCE_URI?.trim() ||

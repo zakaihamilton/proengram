@@ -2,14 +2,20 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getOrganizationId, getPerministerClient } from "./config";
+import { getPerministerClient } from "./config";
 
 export const SESSION_COOKIE = "proengram_session";
+export const ORGANIZATION_COOKIE =
+  process.env.NODE_ENV === "production"
+    ? "__Host-proengram-organization"
+    : "proengram-organization";
 
 type PerministerOrganization = {
   organizationId: string;
   name: string;
   role: string | null;
+  productId: string;
+  canReadBrain: boolean;
 };
 
 export type ProEngramIdentity = {
@@ -17,23 +23,53 @@ export type ProEngramIdentity = {
   email: string | null;
   name: string;
   organization: PerministerOrganization;
+  organizations: PerministerOrganization[];
   accessToken: string;
   clientKind: "dashboard" | "mcp";
 };
 
-function readOrganization(value: unknown): PerministerOrganization | null {
+function readOrganization(value: unknown, productId: string): PerministerOrganization | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
-  const id = typeof row.organizationId === "string" ? row.organizationId : null;
-  if (!id) return null;
+  const id = typeof row.organizationId === "string" ? row.organizationId.trim() : "";
+  if (!id || typeof row.productId !== "string" || row.productId.toLowerCase() !== productId) {
+    return null;
+  }
   const name =
     (typeof row.organizationName === "string" && row.organizationName) ||
     (typeof row.name === "string" && row.name) ||
     "Company workspace";
+  const canReadBrain =
+    row.platformAdmin === true ||
+    (Array.isArray(row.resourceRoles) &&
+      row.resourceRoles.some((value) => {
+        if (!value || typeof value !== "object") return false;
+        const resourceRole = value as Record<string, unknown>;
+        const scope = resourceRole.scope;
+        if (!scope || typeof scope !== "object") return false;
+        const resourceScope = scope as Record<string, unknown>;
+        return (
+          resourceScope.kind === "product" &&
+          typeof resourceScope.organizationId === "string" &&
+          resourceScope.organizationId.toLowerCase() === id.toLowerCase() &&
+          typeof resourceScope.productId === "string" &&
+          resourceScope.productId.toLowerCase() === productId &&
+          Array.isArray(resourceRole.actions) &&
+          resourceRole.actions.includes("brain:read")
+        );
+      }));
+  if (!canReadBrain) return null;
   return {
     organizationId: id.toLowerCase(),
     name,
-    role: typeof row.role === "string" ? row.role : null,
+    role:
+      typeof row.organizationRole === "string"
+        ? row.organizationRole
+        : typeof row.role === "string"
+          ? row.role
+          : null,
+    productId: row.productId.toLowerCase(),
+    canReadBrain,
   };
 }
 
@@ -42,9 +78,7 @@ async function getPerministerIdentity(
   clientKind: "dashboard" | "mcp",
 ): Promise<ProEngramIdentity | null> {
   const client = getPerministerClient(clientKind);
-  const organizationId = getOrganizationId();
   const endpoint = new URL("/api/auth/consumer/session", client.baseUrl);
-  endpoint.searchParams.set("organization_id", organizationId);
   const response = await fetch(endpoint, {
     cache: "no-store",
     headers: {
@@ -62,11 +96,15 @@ async function getPerministerIdentity(
   const account = data.account as Record<string, unknown>;
   const organizations = Array.isArray(data.organizations)
     ? data.organizations
-        .map(readOrganization)
+        .map((organization) => readOrganization(organization, client.productId.toLowerCase()))
         .filter((org): org is PerministerOrganization => org !== null)
     : [];
-  const organization = organizations.find((item) => item.organizationId === organizationId);
-  if (!organization || typeof account.subjectId !== "string") return null;
+  organizations.sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.organizationId.localeCompare(right.organizationId),
+  );
+  if (!organizations.length || typeof account.subjectId !== "string") return null;
   const firstName = typeof account.firstName === "string" ? account.firstName : "";
   const lastName = typeof account.lastName === "string" ? account.lastName : "";
   const email = typeof account.email === "string" ? account.email : null;
@@ -74,7 +112,8 @@ async function getPerministerIdentity(
     subjectId: account.subjectId,
     email,
     name: `${firstName} ${lastName}`.trim() || email || "Company member",
-    organization,
+    organization: organizations[0],
+    organizations,
     accessToken,
     clientKind,
   };
@@ -84,6 +123,22 @@ export async function getDashboardIdentity(): Promise<ProEngramIdentity | null> 
   const jar = await cookies();
   const accessToken = jar.get(SESSION_COOKIE)?.value;
   if (!accessToken) return null;
+  try {
+    const identity = await getPerministerIdentity(accessToken, "dashboard");
+    if (!identity) return null;
+    const selectedOrganizationId = jar.get(ORGANIZATION_COOKIE)?.value?.toLowerCase();
+    const organization = identity.organizations.find(
+      (item) => item.organizationId === selectedOrganizationId,
+    );
+    return organization ? { ...identity, organization } : identity;
+  } catch {
+    return null;
+  }
+}
+
+export async function getDashboardIdentityForAccessToken(
+  accessToken: string,
+): Promise<ProEngramIdentity | null> {
   try {
     return await getPerministerIdentity(accessToken, "dashboard");
   } catch {

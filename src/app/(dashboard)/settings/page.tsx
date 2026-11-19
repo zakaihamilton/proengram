@@ -4,8 +4,8 @@ import { requireDashboardIdentity } from "@/lib/auth/session";
 import { getMcpResourceUri, getPerministerBaseUrl } from "@/lib/auth/config";
 import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
 import { isDatabaseConfigured } from "@/lib/db/pool";
-import { isGitHubConfigured } from "@/lib/github/github";
-import { syncGitHubAction } from "./actions";
+import { getGitHubRepositorySettings, isGitHubConfigured } from "@/lib/github/github";
+import { configureGitHubAction, syncGitHubAction } from "./actions";
 
 function Status({ ready }: { ready: boolean }) {
   return <Badge tone={ready ? "success" : "warning"}>{ready ? "Configured" : "Needs setup"}</Badge>;
@@ -14,11 +14,18 @@ function Status({ ready }: { ready: boolean }) {
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ github?: string | string[]; count?: string | string[] }>;
+  searchParams: Promise<{
+    github?: string | string[];
+    githubSettings?: string | string[];
+    count?: string | string[];
+  }>;
 }) {
-  await requireDashboardIdentity("brain:read");
+  const identity = await requireDashboardIdentity("brain:read");
   const params = await searchParams;
   const githubState = Array.isArray(params.github) ? params.github[0] : params.github;
+  const githubSettingsState = Array.isArray(params.githubSettings)
+    ? params.githubSettings[0]
+    : params.githubSettings;
   const count = Array.isArray(params.count) ? params.count[0] : params.count;
   const dashboardAuthReady = Boolean(
     process.env.PERMINISTER_DASHBOARD_CLIENT_ID && process.env.PERMINISTER_DASHBOARD_CLIENT_SECRET,
@@ -26,8 +33,12 @@ export default async function SettingsPage({
   const mcpAuthReady = Boolean(
     process.env.PERMINISTER_MCP_CLIENT_ID && process.env.PERMINISTER_MCP_CLIENT_SECRET,
   );
-  const githubReady = isGitHubConfigured();
+  const githubAppReady = isGitHubConfigured();
   const databaseReady = isDatabaseConfigured();
+  const githubRepository = databaseReady
+    ? await getGitHubRepositorySettings(identity.organization.organizationId).catch(() => null)
+    : null;
+  const githubReady = githubAppReady && Boolean(githubRepository);
   const mcpUrl = getMcpResourceUri();
 
   return (
@@ -44,6 +55,15 @@ export default async function SettingsPage({
         <Alert tone="error">
           GitHub sync failed. Check the App installation, repository permissions, and Nanogres
           database.
+        </Alert>
+      ) : null}
+      {githubSettingsState === "saved" ? (
+        <Alert tone="success">GitHub repository saved for {identity.organization.name}.</Alert>
+      ) : null}
+      {githubSettingsState === "error" ? (
+        <Alert tone="error">
+          GitHub repository settings could not be saved. Verify the installation, repository, and
+          branch, then try again.
         </Alert>
       ) : null}
 
@@ -79,34 +99,86 @@ export default async function SettingsPage({
           <Status ready={databaseReady} />
           <h2>Nanogres PostgreSQL</h2>
           <p>
-            ProEngram uses a dedicated database and least-privilege role through Nanogres TLS
-            PgBouncer. The connection is server-only.
+            ProEngram uses a dedicated database and least-privilege roles through short-lived
+            Nanogres workload certificates. The connection stays server-side.
           </p>
           <p className="connection-status">
-            {databaseReady ? "Connection string present" : "Set DATABASE_URL"}
+            {databaseReady ? "Workload identity configured" : "Set Nanogres identity settings"}
           </p>
         </Card>
         <Card className="connection-card">
           <Status ready={githubReady} />
-          <h2>GitHub Markdown</h2>
+          <h2>GitHub Markdown for {identity.organization.name}</h2>
           <p>
-            Company Markdown is the canonical source. A GitHub App reads docs and opens reviewable
-            pull requests.
+            Connect this organization to its own GitHub App installation and repository. ProEngram
+            reads Markdown and opens reviewable pull requests there.
           </p>
           <p className="connection-status">
-            {githubReady
-              ? `${process.env.GITHUB_REPO_OWNER}/${process.env.GITHUB_REPO_NAME}`
-              : "Install/configure a GitHub App"}
+            {githubRepository
+              ? `${githubRepository.owner}/${githubRepository.repository} · ${githubRepository.defaultBranch}`
+              : githubAppReady
+                ? "No repository is connected for this organization"
+                : "Set the GitHub App ID and private key"}
           </p>
-          <form action={syncGitHubAction} className="connection-action">
-            <button
-              className="pf-button pf-button-secondary"
-              disabled={!githubReady || !databaseReady}
-              type="submit"
-            >
-              Sync Markdown
-            </button>
-          </form>
+          {githubAppReady && databaseReady ? (
+            <>
+              <form action={configureGitHubAction} className="save-form connection-action">
+                <label className="pf-field">
+                  <span className="pf-field-label">GitHub App installation ID</span>
+                  <input
+                    className="pf-input"
+                    inputMode="numeric"
+                    name="installationId"
+                    placeholder="12345678"
+                    required
+                    defaultValue={githubRepository?.installationId ?? ""}
+                  />
+                </label>
+                <label className="pf-field">
+                  <span className="pf-field-label">Repository owner</span>
+                  <input
+                    className="pf-input"
+                    name="owner"
+                    placeholder="company"
+                    required
+                    defaultValue={githubRepository?.owner ?? ""}
+                  />
+                </label>
+                <label className="pf-field">
+                  <span className="pf-field-label">Repository name</span>
+                  <input
+                    className="pf-input"
+                    name="repository"
+                    placeholder="knowledge"
+                    required
+                    defaultValue={githubRepository?.repository ?? ""}
+                  />
+                </label>
+                <label className="pf-field">
+                  <span className="pf-field-label">Default branch</span>
+                  <input
+                    className="pf-input"
+                    name="defaultBranch"
+                    placeholder="main"
+                    required
+                    defaultValue={githubRepository?.defaultBranch ?? "main"}
+                  />
+                </label>
+                <button className="pf-button pf-button-secondary" type="submit">
+                  Save repository
+                </button>
+              </form>
+              <form action={syncGitHubAction} className="connection-action">
+                <button
+                  className="pf-button pf-button-secondary"
+                  disabled={!githubReady}
+                  type="submit"
+                >
+                  Sync Markdown
+                </button>
+              </form>
+            </>
+          ) : null}
         </Card>
         <Card className="connection-card">
           <Badge tone="warning">Adapter required</Badge>
@@ -140,23 +212,26 @@ export default async function SettingsPage({
           <div>
             <h2>Initial setup</h2>
             <p>
-              Keep each secret in the hosting environment and each database credential on the
-              server.
+              Keep application secrets server-side; database access uses short-lived workload
+              certificates.
             </p>
           </div>
         </div>
         <ol className="setup-list">
           <li>
-            Create a dedicated <code>proengram</code> database and application/migration roles in
-            Nanogres, then set <code>DATABASE_URL</code> and <code>MIGRATION_DATABASE_URL</code>.
+            Create a dedicated <code>proengram</code> database and runtime/migration roles in
+            Nanogres, then grant this environment's exact Vercel OIDC identity.
           </li>
           <li>
             Configure separate Perminister clients for dashboard OIDC and MCP resource
             introspection.
           </li>
-          <li>Set the GitHub App permissions for repository contents and pull requests.</li>
           <li>
-            Apply <code>db/migrations/001_initial.sql</code> with <code>pnpm db:migrate</code>.
+            Set the GitHub App permissions for repository contents and pull requests, then connect a
+            repository for each organization in Settings.
+          </li>
+          <li>
+            Apply the numbered database migrations with <code>pnpm db:migrate</code>.
           </li>
           <li>
             Run <code>pnpm health:audit</code> and review the available Repnix guardrails.

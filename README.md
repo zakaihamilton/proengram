@@ -4,8 +4,8 @@ ProEngram is a company knowledge dashboard and remote MCP server. Each employee 
 
 ## Architecture
 
-- **Identity and authorization:** Perminister handles dashboard sign-in and issues resource-scoped user tokens for MCP. ProEngram introspects each token and checks the user's current Perminister grant for every tool action.
-- **Shared knowledge:** GitHub Markdown is synced into a searchable index in Nanogres PostgreSQL. Saved answers and citations are also shared with the user's company workspace.
+- **Identity and authorization:** Perminister handles dashboard sign-in and supplies each user's ProEngram organizations. The dashboard remembers the active organization, and every protected action checks its current Perminister grant. MCP tools accept an organization ID when the user has more than one.
+- **Shared knowledge:** GitHub Markdown is synced into a searchable index in Nanogres PostgreSQL for each organization. Saved answers, policy snapshots, and activity are scoped to the same organization.
 - **Reviewable edits:** `propose_markdown_change` creates a GitHub pull request under `docs/`; it never merges automatically.
 - **Policies:** ProEngram stores reviewed Sentry8 policy snapshots. Direct ProEngram MCP calls are not currently evaluated by Sentry8. See [`docs/sentry8-integration.md`](docs/sentry8-integration.md).
 - **Dashboard:** The company dashboard uses Panel Frame UI. `/ui-preview` is a development-only gallery built with UI Preview Kit and synthetic content.
@@ -14,7 +14,7 @@ ProEngram is a company knowledge dashboard and remote MCP server. Each employee 
 
 1. Install Node.js 24.22.1 or newer in the 24.x line, plus pnpm 12.18 or newer.
 2. Copy `.env.example` to `.env.local` and fill in the settings below.
-3. Create a dedicated ProEngram database and least-privilege runtime and migration roles in Nanogres. Put the runtime TLS connection string in `DATABASE_URL` and the migration-role connection string in `MIGRATION_DATABASE_URL`.
+3. Create a dedicated ProEngram database and least-privilege runtime and migration roles in Nanogres. Configure the Nanogres organization, database, and role names; grant this Vercel project's exact development OIDC identity. `vercel env pull .env.local` supplies a short-lived local OIDC token.
 4. Install dependencies with `pnpm install`, apply the schema with `pnpm db:migrate`, then run `pnpm dev`. The migration command reads `.env.local` automatically.
 5. Open `http://localhost:3000`. Use `/ui-preview` for the synthetic component gallery.
 
@@ -29,17 +29,21 @@ Create a separate dashboard and MCP client pair for each environment. The MCP cl
 
 For each dashboard client, enable `openid`, `profile`, `email`, and `perminister_api`. For each MCP client, register only that environment's resource URI and the scopes `brain:read`, `policy:read`, `result:save`, and `knowledge:propose`. Keep registration invite-only. Remote assistant clients register separately with Perminister through OAuth discovery.
 
-Copy `.env.example` to `.env.local` and enter the local client IDs and secrets there. In Vercel, set the matching production values in the `proengram` project's Production environment. Set `PROENGRAM_ORIGIN` and `PERMINISTER_MCP_RESOURCE_URI` to the corresponding row above, and set `PERMINISTER_ORGANIZATION_ID` to the lowercase organization identifier used by this deployment. Set `PERMINISTER_ISSUER` to the issuer returned by Perminister metadata. Keep client secrets server-only, and set `PROENGRAM_COOKIE_SECRET` to a dedicated random value of at least 32 characters in each environment. Production origins and the MCP resource URI must use HTTPS.
+Copy `.env.example` to `.env.local` and enter the local client IDs and secrets there. In Vercel, set the matching production values in the `proengram` project's Production environment. Set `PROENGRAM_ORIGIN` and `PERMINISTER_MCP_RESOURCE_URI` to the corresponding row above. Set `PERMINISTER_ISSUER` to the issuer returned by Perminister metadata. Keep client secrets server-only, and set `PROENGRAM_COOKIE_SECRET` to a dedicated random value of at least 32 characters in each environment. Production origins and the MCP resource URI must use HTTPS. There is no deployment-wide Perminister organization setting; users choose from the organizations where they have ProEngram access.
 
 The MCP endpoint is `/mcp`. Protected Resource Metadata is published at the RFC 9728 path for that exact resource URL (for example, `/.well-known/oauth-protected-resource/mcp`). ChatGPT and Claude discover Perminister there and obtain a separate user token for the ProEngram resource.
 
+The dashboard stores its active organization in a browser cookie. MCP calls are stateless and do not use that cookie: call `list_organizations`, then pass the chosen `organizationId` to `search_knowledge`, `get_document`, `get_policy`, `save_result`, and `propose_markdown_change` when the account has multiple organizations. The ID may be omitted when the account has exactly one. Perminister checks the current grant for the selected organization and action.
+
 ## GitHub setup
 
-Install a GitHub App on the one company knowledge repository. Grant repository Contents read/write and Pull Requests read/write permissions. Configure the app ID, installation ID, private key, owner, repository, and default branch in the environment. ProEngram syncs Markdown into Nanogres and limits proposed edits to `docs/*.md` or `docs/*.mdx` pull requests. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped.
+Configure one GitHub App ID and private key in the environment. Install that app on each organization's knowledge repository and grant Contents read/write and Pull Requests read/write permissions. In each ProEngram organization's Settings page, enter that installation ID, repository owner, repository name, and default branch. ProEngram checks that the installation can access the repository and branch before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. Proposed edits stay in the selected organization's repository and create reviewable pull requests under `docs/`.
+
+For an existing single-organization deployment, keep `PERMINISTER_ORGANIZATION_ID`, `GITHUB_INSTALLATION_ID`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, and `GITHUB_DEFAULT_BRANCH` configured for the first `pnpm db:migrate` after upgrading. The migration copies the GitHub target into that organization's settings if no record exists. Then remove those legacy variables; retain only `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` at deployment level.
 
 ## Database and migrations
 
-`DATABASE_URL` and `MIGRATION_DATABASE_URL` are server-only. Apply schema changes with `pnpm db:migrate`; the migration runner uses a PostgreSQL advisory lock. For hosted deployments, run migrations from a controlled release step with the migration role, then run the app with the narrower runtime role.
+ProEngram exchanges Vercel OIDC tokens for 15-minute Nanogres client certificates. Set `NANOGRES_ORGANIZATION_ID`, `NANOGRES_DATABASE`, `NANOGRES_RUNTIME_ROLE`, `NANOGRES_MIGRATION_ROLE`, and `NANOGRES_MIGRATION_OWNER_ROLE` in each environment. This Nanogres organization identifies the shared infrastructure database; ProEngram customer organizations remain isolated by `organization_id` within that database. Add exact-match issuer, audience, and subject grants for development, preview, and production in Nanogres; keep each environment on its own scoped roles. Runtime connections use transaction pooling. Migrations use session pooling and assume the configured owner role before taking an advisory lock. The app never stores a PostgreSQL password or connection URL. Apply schema changes with `pnpm db:migrate`; the runner applies all numbered SQL migrations idempotently.
 
 ## Sentry8 policy snapshots
 

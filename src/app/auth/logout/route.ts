@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getPerministerClient, getPublicOrigin, isCookieSecure } from "@/lib/auth/config";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { ORGANIZATION_COOKIE, SESSION_COOKIE } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -25,6 +25,13 @@ export async function POST(): Promise<Response> {
     }
   }
   jar.set(SESSION_COOKIE, "", {
+    httpOnly: true,
+    secure: isCookieSecure(),
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  jar.set(ORGANIZATION_COOKIE, "", {
     httpOnly: true,
     secure: isCookieSecure(),
     sameSite: "lax",
