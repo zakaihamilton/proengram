@@ -48,7 +48,7 @@ Grant the App Contents read/write and Pull requests read/write repository permis
 
 An organization admin connects one or more GitHub user accounts in that organization's Settings page, then adds repositories those accounts can access. Accounts and repositories are scoped to the ProEngram organization; admins can remove either at any time. The account must have access to the GitHub App installation and selected repository. ProEngram checks repository access before saving. Sync is capped at 500 Markdown files and 20 MB total; individual files above 300 KB are skipped. `propose_markdown_change` creates reviewable pull requests under `docs/` in the selected repository and never merges them automatically.
 
-For an existing single-organization deployment, retain `PERMINISTER_ORGANIZATION_ID`, `GITHUB_INSTALLATION_ID`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, and `GITHUB_DEFAULT_BRANCH` through the first `pnpm db:migrate` after upgrading if those values were previously used for migration backfill. The migration carries the old repository target into the new source table as needing authorization; an admin then reconnects a GitHub account and selects the repository in Settings. Remove the legacy variables afterward.
+For an existing deployment, migration 003 carries any repository already stored in `github_repository_settings` into the new source table as needing authorization. An admin reconnects a GitHub account and selects the repository in Settings before it can sync again.
 
 ## Database and migrations
 
