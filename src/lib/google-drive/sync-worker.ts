@@ -273,9 +273,10 @@ async function saveIndexedFile(input: {
     );
     const itemId = result.rows[0]?.id;
     if (!itemId) throw new Error("The indexed Google Drive document could not be retrieved.");
-    await writeItemVersion(client, {
+    const versionId = await writeItemVersion(client, {
       organizationId: input.organizationId,
       itemId,
+      title: input.file.name.slice(0, 240),
       markdown: input.markdown,
       sourceRevision: revision,
       sourceModifiedAt: input.file.modifiedTime,
@@ -283,6 +284,7 @@ async function saveIndexedFile(input: {
     await replaceBrainChunks(client, {
       organizationId: input.organizationId,
       itemId,
+      versionId,
       markdown: input.markdown,
       title: input.file.name.slice(0, 240),
       segments: input.segments,

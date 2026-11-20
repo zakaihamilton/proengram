@@ -19,10 +19,20 @@ export function BrainItemCard({ item }: { item: BrainItem }) {
         <Badge tone={item.kind === "sentry8_policy" ? "accent" : "neutral"}>
           {kindLabels[item.kind]}
         </Badge>
+        {item.isHistoricalMatch ? <Badge tone="warning">Historical match</Badge> : null}
         <span>{formatRelativeTime(item.updatedAt)}</span>
-        {item.sourceRevision ? <span>Revision {item.sourceRevision.slice(0, 8)}</span> : null}
+        {(item.matchSourceRevision ?? item.sourceRevision) ? (
+          <span>Revision {(item.matchSourceRevision ?? item.sourceRevision)?.slice(0, 8)}</span>
+        ) : null}
       </div>
-      <Link className="brain-item-title" href={`/knowledge/${item.id}`}>
+      <Link
+        className="brain-item-title"
+        href={
+          item.isHistoricalMatch && item.matchVersionId
+            ? `/knowledge/${item.id}?version=${item.matchVersionId}`
+            : `/knowledge/${item.id}`
+        }
+      >
         {item.title}
       </Link>
       {item.projectName ? <span className="metric-note">{item.projectName}</span> : null}

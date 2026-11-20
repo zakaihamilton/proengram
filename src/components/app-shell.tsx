@@ -18,6 +18,12 @@ const links = [
     label: "Knowledge",
     icon: "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5zM5 4.5v17M9 6h7M9 10h7",
   },
+  {
+    href: "/knowledge/review",
+    label: "Review suggestions",
+    icon: "M5 12.5 9.5 17 19 7M4 4h16v16H4z",
+    reviewerOnly: true,
+  },
   { href: "/saved", label: "Saved answers", icon: "M6 3h12v18l-6-4-6 4z" },
   {
     href: "/policies",
@@ -59,6 +65,7 @@ export function AppShell({
   organizationId,
   organizations,
   canReviewFeedback,
+  canReviewKnowledge,
 }: {
   children: ReactNode;
   userName: string;
@@ -66,6 +73,7 @@ export function AppShell({
   organizationId: string;
   organizations: Array<{ organizationId: string; name: string }>;
   canReviewFeedback: boolean;
+  canReviewKnowledge: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -109,10 +117,19 @@ export function AppShell({
         <nav aria-label="Main navigation" className="pf-sidebar-group">
           <p className="pf-sidebar-group-label">COMPANY BRAIN</p>
           {links
-            .filter((link) => !link.managerOnly || canReviewFeedback)
+            .filter(
+              (link) =>
+                (!link.managerOnly || canReviewFeedback) &&
+                (!link.reviewerOnly || canReviewKnowledge),
+            )
             .map((link) => {
               const active =
-                link.href === "/overview" ? pathname === link.href : pathname.startsWith(link.href);
+                link.href === "/overview" || link.href === "/knowledge/review"
+                  ? pathname === link.href
+                  : link.href === "/knowledge"
+                    ? pathname === link.href ||
+                      (pathname.startsWith(`${link.href}/`) && pathname !== "/knowledge/review")
+                    : pathname.startsWith(link.href);
               return (
                 <Link
                   aria-current={active ? "page" : undefined}

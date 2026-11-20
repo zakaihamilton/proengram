@@ -205,6 +205,7 @@ const TOOL_ACTIONS: Record<string, string> = {
   get_policy: "policy:read",
   save_result: "result:save",
   save_memory: "result:save",
+  suggest_knowledge_capture: "result:save",
   submit_knowledge_feedback: "brain:feedback",
   propose_markdown_change: "knowledge:propose",
 };

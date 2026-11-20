@@ -9,8 +9,8 @@ export type KnowledgeChunk = {
   locator: string | null;
 };
 
-const CHUNK_SIZE = 1800;
-const CHUNK_STRIDE = 1500;
+const CHUNK_SIZE = 900;
+const CHUNK_STRIDE = 750;
 
 function splitLongText(text: string): string[] {
   const chunks: string[] = [];
@@ -72,4 +72,25 @@ export function chunkMarkdown(markdown: string): KnowledgeChunk[] {
     segments.push({ text: markdown.trim(), locator: null });
   }
   return chunkSegments(segments);
+}
+
+export function buildSearchableChunks(input: {
+  markdown: string;
+  title?: string;
+  segments?: KnowledgeSegment[];
+}): KnowledgeChunk[] {
+  const chunks = input.segments
+    ? chunkSegments([
+        ...(input.title ? [{ text: input.title, locator: "Title" }] : []),
+        ...input.segments,
+      ])
+    : chunkMarkdown(input.title ? `# ${input.title}\n\n${input.markdown}` : input.markdown);
+  return chunks.map((chunk) => {
+    const parts = [
+      input.title?.trim(),
+      chunk.locator === "Title" ? null : chunk.locator?.trim(),
+      chunk.content.trim(),
+    ].filter((part): part is string => Boolean(part));
+    return { ...chunk, content: [...new Set(parts)].join("\n") };
+  });
 }

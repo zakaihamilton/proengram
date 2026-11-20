@@ -5,23 +5,29 @@ export async function GET() {
     {
       schemaVersion: 1,
       productId,
-      version: "1.0.0",
+      version: "1.1.0",
       roles: [
         {
           id: "knowledge-reader",
           name: "Knowledge reader",
-          description: "Read the shared brain and knowledge base.",
+          description: "Read shared knowledge, provide feedback, and review suggestions.",
           role: "viewer",
           scopeKinds: ["product"],
-          actions: ["brain:read", "brain:feedback"],
+          actions: ["brain:read", "brain:feedback", "knowledge:approve"],
         },
         {
           id: "knowledge-contributor",
           name: "Knowledge contributor",
-          description: "Read, save results, and propose knowledge updates.",
+          description: "Read, save, propose knowledge updates, and review suggestions.",
           role: "editor",
           scopeKinds: ["product"],
-          actions: ["brain:read", "brain:feedback", "result:save", "knowledge:propose"],
+          actions: [
+            "brain:read",
+            "brain:feedback",
+            "result:save",
+            "knowledge:propose",
+            "knowledge:approve",
+          ],
         },
         {
           id: "knowledge-manager",
@@ -35,6 +41,7 @@ export async function GET() {
             "policy:read",
             "result:save",
             "knowledge:propose",
+            "knowledge:approve",
             "source:manage",
             "source:sync",
           ],
