@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { chunkMarkdown, chunkSegments, type KnowledgeSegment } from "@/lib/knowledge/chunk";
+import { withDatabaseTransaction } from "@/lib/db/transaction";
 import { getPool } from "./pool";
 
 export type BrainItemKind =
@@ -419,31 +420,39 @@ export async function replaceBrainChunks(
   );
 }
 
-export async function saveResult(input: {
+type PersistBrainItemInput = {
   organizationId: string;
   subjectId: string;
+  kind: BrainItemKind;
   title: string;
   markdown: string;
+  chunkTitle: string;
+  projectName?: string | null;
+  occurredAt?: string | null;
   citations: Array<{ title: string; url: string }>;
-}): Promise<BrainItem> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
+  summary: string;
+  metadata?: Record<string, unknown>;
+};
+
+async function persistBrainItem(input: PersistBrainItemInput): Promise<BrainItem> {
   const id = randomUUID();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  return withDatabaseTransaction(async (client) => {
     const result = await client.query(
       `INSERT INTO brain_items
-        (id, organization_id, kind, external_key, title, markdown, owner_subject_id, citations)
-       VALUES ($1, $2, 'saved_answer', $1, $3, $4, $5, $6::jsonb)
+        (id, organization_id, kind, external_key, title, markdown, owner_subject_id,
+         citations, project_name, occurred_at)
+       VALUES ($1, $2, $3, $1, $4, $5, $6, $7::jsonb, $8, $9)
        RETURNING ${ITEM_FIELDS}`,
       [
         id,
         input.organizationId,
+        input.kind,
         input.title,
         input.markdown,
         input.subjectId,
         JSON.stringify(input.citations),
+        input.projectName ?? null,
+        input.occurredAt ?? null,
       ],
     );
     await writeItemVersion(client, {
@@ -455,25 +464,35 @@ export async function saveResult(input: {
       organizationId: input.organizationId,
       itemId: id,
       markdown: input.markdown,
-      title: input.title,
+      title: input.chunkTitle,
     });
     await writeActivity(client, {
       id: randomUUID(),
       organizationId: input.organizationId,
       actorSubjectId: input.subjectId,
       action: "result:save",
-      itemKind: "saved_answer",
+      itemKind: input.kind,
       itemId: id,
-      summary: `Saved “${input.title}” to the company brain.`,
+      summary: input.summary,
+      metadata: input.metadata,
     });
-    await client.query("COMMIT");
     return mapItem(result.rows[0]);
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
+}
+
+export async function saveResult(input: {
+  organizationId: string;
+  subjectId: string;
+  title: string;
+  markdown: string;
+  citations: Array<{ title: string; url: string }>;
+}): Promise<BrainItem> {
+  return persistBrainItem({
+    ...input,
+    kind: "saved_answer",
+    chunkTitle: input.title,
+    summary: `Saved “${input.title}” to the company brain.`,
+  });
 }
 
 export async function saveMemory(input: {
@@ -486,61 +505,15 @@ export async function saveMemory(input: {
   occurredAt: string;
   citations: Array<{ title: string; url: string }>;
 }): Promise<BrainItem> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const id = randomUUID();
   const kind: BrainItemKind =
     input.recordType === "decision" ? "decision_record" : "project_update";
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query(
-      `INSERT INTO brain_items
-        (id, organization_id, kind, external_key, title, markdown, owner_subject_id,
-         citations, project_name, occurred_at)
-       VALUES ($1, $2, $3, $1, $4, $5, $6, $7::jsonb, $8, $9)
-       RETURNING ${ITEM_FIELDS}`,
-      [
-        id,
-        input.organizationId,
-        kind,
-        input.title,
-        input.markdown,
-        input.subjectId,
-        JSON.stringify(input.citations),
-        input.projectName,
-        input.occurredAt,
-      ],
-    );
-    await writeItemVersion(client, {
-      organizationId: input.organizationId,
-      itemId: id,
-      markdown: input.markdown,
-    });
-    await replaceBrainChunks(client, {
-      organizationId: input.organizationId,
-      itemId: id,
-      markdown: input.markdown,
-      title: input.projectName ? `${input.projectName}: ${input.title}` : input.title,
-    });
-    await writeActivity(client, {
-      id: randomUUID(),
-      organizationId: input.organizationId,
-      actorSubjectId: input.subjectId,
-      action: "result:save",
-      itemKind: kind,
-      itemId: id,
-      summary: `Saved a ${input.recordType.replace("_", " ")} record: ${input.title}.`,
-      metadata: { projectName: input.projectName, occurredAt: input.occurredAt },
-    });
-    await client.query("COMMIT");
-    return mapItem(result.rows[0]);
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  return persistBrainItem({
+    ...input,
+    kind,
+    chunkTitle: input.projectName ? `${input.projectName}: ${input.title}` : input.title,
+    summary: `Saved a ${input.recordType.replace("_", " ")} record: ${input.title}.`,
+    metadata: { projectName: input.projectName, occurredAt: input.occurredAt },
+  });
 }
 
 export async function saveKnowledgeFeedback(input: {
@@ -631,11 +604,7 @@ export async function resolveKnowledgeFeedback(input: {
   subjectId: string;
   feedbackId: string;
 }): Promise<void> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  await withDatabaseTransaction(async (client) => {
     const result = await client.query<{ item_id: string; item_title: string }>(
       `UPDATE knowledge_feedback AS feedback
           SET status = 'resolved', resolved_at = now(), resolved_by_subject_id = $3
@@ -657,13 +626,7 @@ export async function resolveKnowledgeFeedback(input: {
       summary: `Resolved feedback for “${feedback.item_title}”.`,
       metadata: { itemId: feedback.item_id },
     });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function writeActivity(

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { withDatabaseTransaction } from "@/lib/db/transaction";
 import { getPool } from "@/lib/db/pool";
 
 export type GitHubSyncTrigger = "initial" | "webhook" | "reconcile";
@@ -174,11 +175,7 @@ export async function enqueueReconciliationJobs(): Promise<number> {
 }
 
 export async function claimGitHubSyncJob(jobId?: string): Promise<GitHubSyncJob | null> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  return withDatabaseTransaction(async (client) => {
     const result = await client.query<GitHubSyncJobRow>(
       `SELECT job.id,
               job.organization_id,
@@ -207,10 +204,7 @@ export async function claimGitHubSyncJob(jobId?: string): Promise<GitHubSyncJob 
       [jobId ?? null],
     );
     const row = result.rows[0];
-    if (!row) {
-      await client.query("COMMIT");
-      return null;
-    }
+    if (!row) return null;
     if (row.source_status !== "active" || row.account_status !== "active") {
       await client.query(
         `UPDATE github_sync_jobs
@@ -222,7 +216,6 @@ export async function claimGitHubSyncJob(jobId?: string): Promise<GitHubSyncJob 
           WHERE id = $1`,
         [row.id],
       );
-      await client.query("COMMIT");
       return null;
     }
     const claimed = await client.query<GitHubSyncJobRow>(
@@ -239,14 +232,8 @@ export async function claimGitHubSyncJob(jobId?: string): Promise<GitHubSyncJob 
                   'active'::text AS account_status`,
       [row.id],
     );
-    await client.query("COMMIT");
     return claimed.rows[0] ? mapJob(claimed.rows[0]) : null;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function completeGitHubSyncJob(

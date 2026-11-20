@@ -99,6 +99,21 @@ function selectedDriveFiles(
   );
 }
 
+async function fullDriveScan(
+  accessToken: string,
+  driveId: string,
+  selectedFolderIds: string[],
+): Promise<{ files: GoogleDriveFile[]; inScopeIds: Set<string> }> {
+  const allFiles = await listGoogleDriveFiles(accessToken, driveId);
+  if (allFiles.length > MAX_DRIVE_FILES) {
+    throw new Error(
+      `The Shared Drive exceeds the ${MAX_DRIVE_FILES.toLocaleString()} file sync limit.`,
+    );
+  }
+  const files = selectedDriveFiles(allFiles, selectedFolderIds);
+  return { files, inScopeIds: new Set(files.map((file) => file.id)) };
+}
+
 function sourceRevision(file: GoogleDriveFile, markdown: string): string {
   return (
     file.headRevisionId || file.modifiedTime || createHash("sha256").update(markdown).digest("hex")
@@ -344,7 +359,7 @@ async function finalizeGoogleDriveSourceSync(input: {
   if (contextChanged) throw new GoogleDriveSyncContextChangedError();
 }
 
-export async function syncGoogleDriveSource(input: {
+async function syncGoogleDriveSource(input: {
   organizationId: string;
   sourceId: string;
   actorSubjectId: string;
@@ -393,14 +408,9 @@ export async function syncGoogleDriveSource(input: {
     const removedFileIds = new Set<string>();
     const outOfScopeFiles: GoogleDriveFile[] = [];
     if (fullScan) {
-      const allFiles = await listGoogleDriveFiles(accessToken, source.driveId);
-      if (allFiles.length > MAX_DRIVE_FILES) {
-        throw new Error(
-          `The Shared Drive exceeds the ${MAX_DRIVE_FILES.toLocaleString()} file sync limit.`,
-        );
-      }
-      files = selectedDriveFiles(allFiles, source.selectedFolderIds);
-      inScopeIds = new Set(files.map((file) => file.id));
+      const scan = await fullDriveScan(accessToken, source.driveId, source.selectedFolderIds);
+      files = scan.files;
+      inScopeIds = scan.inScopeIds;
     } else {
       const folderList = source.selectedFolderIds.length
         ? await listGoogleDriveFolders(accessToken, source.driveId)
@@ -427,14 +437,9 @@ export async function syncGoogleDriveSource(input: {
         else outOfScopeFiles.push(file);
       }
       if (fullScan) {
-        const allFiles = await listGoogleDriveFiles(accessToken, source.driveId);
-        if (allFiles.length > MAX_DRIVE_FILES) {
-          throw new Error(
-            `The Shared Drive exceeds the ${MAX_DRIVE_FILES.toLocaleString()} file sync limit.`,
-          );
-        }
-        files = selectedDriveFiles(allFiles, source.selectedFolderIds);
-        inScopeIds = new Set(files.map((file) => file.id));
+        const scan = await fullDriveScan(accessToken, source.driveId, source.selectedFolderIds);
+        files = scan.files;
+        inScopeIds = scan.inScopeIds;
         removedFileIds.clear();
         outOfScopeFiles.length = 0;
       }

@@ -103,6 +103,37 @@ function driveUrl(path: string): URL {
 const FILE_FIELDS =
   "id,name,mimeType,modifiedTime,webViewLink,parents,driveId,headRevisionId,size,trashed";
 
+async function listDriveFilePages<T>(
+  accessToken: string,
+  driveId: string,
+  query: string,
+  map: (file: GoogleDriveApiFile) => T | null,
+): Promise<T[]> {
+  const files: T[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = driveUrl("/files");
+    url.searchParams.set("corpora", "drive");
+    url.searchParams.set("driveId", driveId);
+    url.searchParams.set("includeItemsFromAllDrives", "true");
+    url.searchParams.set("supportsAllDrives", "true");
+    url.searchParams.set("q", query);
+    url.searchParams.set("pageSize", "1000");
+    url.searchParams.set("fields", `nextPageToken,files(${FILE_FIELDS})`);
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const result = await apiRequest<{
+      nextPageToken?: string;
+      files?: GoogleDriveApiFile[];
+    }>(accessToken, url);
+    for (const raw of result.files ?? []) {
+      const item = map(raw);
+      if (item) files.push(item);
+    }
+    pageToken = result.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
 export async function listGoogleSharedDrives(accessToken: string): Promise<GoogleDriveSummary[]> {
   const drives: GoogleDriveSummary[] = [];
   let pageToken: string | undefined;
@@ -127,61 +158,22 @@ export async function listGoogleDriveFolders(
   accessToken: string,
   driveId: string,
 ): Promise<GoogleDriveFolder[]> {
-  const folders: GoogleDriveFolder[] = [];
-  let pageToken: string | undefined;
-  do {
-    const url = driveUrl("/files");
-    url.searchParams.set("corpora", "drive");
-    url.searchParams.set("driveId", driveId);
-    url.searchParams.set("includeItemsFromAllDrives", "true");
-    url.searchParams.set("supportsAllDrives", "true");
-    url.searchParams.set(
-      "q",
-      "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-    );
-    url.searchParams.set("pageSize", "1000");
-    url.searchParams.set("fields", `nextPageToken,files(${FILE_FIELDS})`);
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const result = await apiRequest<{
-      nextPageToken?: string;
-      files?: GoogleDriveApiFile[];
-    }>(accessToken, url);
-    for (const raw of result.files ?? []) {
+  return listDriveFilePages(
+    accessToken,
+    driveId,
+    "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+    (raw) => {
       const file = mapFile(raw);
-      if (file) folders.push({ id: file.id, name: file.name, parents: file.parents });
-    }
-    pageToken = result.nextPageToken;
-  } while (pageToken);
-  return folders;
+      return file ? { id: file.id, name: file.name, parents: file.parents } : null;
+    },
+  );
 }
 
 export async function listGoogleDriveFiles(
   accessToken: string,
   driveId: string,
 ): Promise<GoogleDriveFile[]> {
-  const files: GoogleDriveFile[] = [];
-  let pageToken: string | undefined;
-  do {
-    const url = driveUrl("/files");
-    url.searchParams.set("corpora", "drive");
-    url.searchParams.set("driveId", driveId);
-    url.searchParams.set("includeItemsFromAllDrives", "true");
-    url.searchParams.set("supportsAllDrives", "true");
-    url.searchParams.set("q", "trashed = false");
-    url.searchParams.set("pageSize", "1000");
-    url.searchParams.set("fields", `nextPageToken,files(${FILE_FIELDS})`);
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const result = await apiRequest<{
-      nextPageToken?: string;
-      files?: GoogleDriveApiFile[];
-    }>(accessToken, url);
-    for (const raw of result.files ?? []) {
-      const file = mapFile(raw);
-      if (file) files.push(file);
-    }
-    pageToken = result.nextPageToken;
-  } while (pageToken);
-  return files;
+  return listDriveFilePages(accessToken, driveId, "trashed = false", mapFile);
 }
 
 export async function getGoogleDriveStartPageToken(

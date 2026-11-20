@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Alert, Badge, Card, PageHeader } from "panel-frame-ui";
 import { getMcpResourceUri, getPerministerBaseUrl, getPublicOrigin } from "@/lib/auth/config";
 import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
@@ -72,6 +73,40 @@ function InlineActionForm({
         {label}
       </button>
     </form>
+  );
+}
+
+function RemoveSourceAction({
+  action,
+  sourceId,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  sourceId: string;
+}) {
+  return <InlineActionForm action={action} fieldName="sourceId" label="Remove" value={sourceId} />;
+}
+
+function ConnectionStatusList<T extends { id: string }>({
+  items,
+  title,
+  renderRow,
+}: {
+  items: T[];
+  title: string;
+  renderRow: (item: T) => ReactNode;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="connection-action">
+      <h3>{title}</h3>
+      <div className="status-list">
+        {items.map((item) => (
+          <div className="status-row" key={item.id}>
+            {renderRow(item)}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -430,64 +465,59 @@ export default async function SettingsPage({
                 })
             : null}
 
-          {githubSources.length ? (
-            <div className="connection-action">
-              <h3>Repositories</h3>
-              <div className="status-list">
-                {githubSources.map((source) => (
-                  <div className="status-row" key={source.id}>
-                    <span>
-                      <strong>
-                        {source.owner}/{source.repository}
-                      </strong>
-                      <span className="metric-note">
-                        {source.githubLogin ? `@${source.githubLogin} · ` : ""}
-                        {source.defaultBranch}
-                        {source.syncPending ? " · Sync queued" : ""}
-                        {source.lastSyncedAt
-                          ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
-                          : ""}
-                        {source.webhookStatus === "active"
-                          ? " · Push sync enabled"
-                          : " · Scheduled sync only"}
-                      </span>
-                    </span>
-                    <div className="connection-row-actions">
-                      <Badge tone={source.status === "active" ? "success" : "warning"}>
-                        {source.status === "active" ? "Active" : "Reconnect account"}
-                      </Badge>
-                      {source.status === "active" && canSyncSources ? (
-                        <InlineActionForm
-                          action={syncGitHubAction}
-                          fieldName="sourceId"
-                          label="Sync"
-                          value={source.id}
-                        />
-                      ) : null}
-                      {source.status === "active" &&
-                      canManageSources &&
-                      source.webhookStatus !== "active" ? (
-                        <InlineActionForm
-                          action={retryGitHubWebhookAction}
-                          fieldName="sourceId"
-                          label="Retry push setup"
-                          value={source.id}
-                        />
-                      ) : null}
-                      {canManageSources ? (
-                        <InlineActionForm
-                          action={removeGitHubRepositoryAction}
-                          fieldName="sourceId"
-                          label="Remove"
-                          value={source.id}
-                        />
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <ConnectionStatusList
+            items={githubSources}
+            title="Repositories"
+            renderRow={(source) => (
+              <>
+                <span>
+                  <strong>
+                    {source.owner}/{source.repository}
+                  </strong>
+                  <span className="metric-note">
+                    {source.githubLogin ? `@${source.githubLogin} · ` : ""}
+                    {source.defaultBranch}
+                    {source.syncPending ? " · Sync queued" : ""}
+                    {source.lastSyncedAt
+                      ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
+                      : ""}
+                    {source.webhookStatus === "active"
+                      ? " · Push sync enabled"
+                      : " · Scheduled sync only"}
+                  </span>
+                </span>
+                <div className="connection-row-actions">
+                  <Badge tone={source.status === "active" ? "success" : "warning"}>
+                    {source.status === "active" ? "Active" : "Reconnect account"}
+                  </Badge>
+                  {source.status === "active" && canSyncSources ? (
+                    <InlineActionForm
+                      action={syncGitHubAction}
+                      fieldName="sourceId"
+                      label="Sync"
+                      value={source.id}
+                    />
+                  ) : null}
+                  {source.status === "active" &&
+                  canManageSources &&
+                  source.webhookStatus !== "active" ? (
+                    <InlineActionForm
+                      action={retryGitHubWebhookAction}
+                      fieldName="sourceId"
+                      label="Retry push setup"
+                      value={source.id}
+                    />
+                  ) : null}
+                  {canManageSources ? (
+                    <RemoveSourceAction
+                      action={removeGitHubRepositoryAction}
+                      sourceId={source.id}
+                    />
+                  ) : null}
+                </div>
+              </>
+            )}
+          />
         </Card>
 
         <Card className="connection-card">
@@ -622,63 +652,58 @@ export default async function SettingsPage({
             </>
           ) : null}
 
-          {googleDriveSources.length ? (
-            <div className="connection-action">
-              <h3>Selected sources</h3>
-              <div className="status-list">
-                {googleDriveSources.map((source) => (
-                  <div className="status-row" key={source.id}>
-                    <span>
-                      <strong>{source.driveName}</strong>
-                      <span className="metric-note">
-                        {source.selectedFolderIds.length
-                          ? source.selectedFolderIds
-                              .map((folderId) =>
-                                folderDisplayPath(
-                                  folderId,
-                                  googleDriveFolders.get(source.driveId) ?? [],
-                                ),
-                              )
-                              .join(" · ")
-                          : "Entire Shared Drive"}
-                        {source.lastSyncedAt
-                          ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
-                          : " · Sync pending"}
-                        {source.syncPending ? " · Sync queued" : ""}
-                        {source.lastSyncStatus === "failed" ? " · Last sync failed" : ""}
-                        {` · ${source.indexedCount} indexed · ${source.skippedCount} skipped · ${source.errorCount} errors`}
-                      </span>
-                    </span>
-                    <div className="connection-row-actions">
-                      <Badge tone={source.status === "active" ? "success" : "warning"}>
-                        {source.status === "active"
-                          ? "Active"
-                          : source.status === "needs_auth"
-                            ? "Reconnect account"
-                            : "Disabled"}
-                      </Badge>
-                      {source.status === "active" && canSyncSources ? (
-                        <InlineActionForm
-                          action={syncGoogleDriveAction}
-                          fieldName="sourceId"
-                          label="Sync"
-                          value={source.id}
-                        />
-                      ) : null}
-                      {canManageSources ? (
-                        <InlineActionForm
-                          action={removeGoogleDriveSourceAction}
-                          fieldName="sourceId"
-                          label="Remove"
-                          value={source.id}
-                        />
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <ConnectionStatusList
+            items={googleDriveSources}
+            title="Selected sources"
+            renderRow={(source) => (
+              <>
+                <span>
+                  <strong>{source.driveName}</strong>
+                  <span className="metric-note">
+                    {source.selectedFolderIds.length
+                      ? source.selectedFolderIds
+                          .map((folderId) =>
+                            folderDisplayPath(
+                              folderId,
+                              googleDriveFolders.get(source.driveId) ?? [],
+                            ),
+                          )
+                          .join(" · ")
+                      : "Entire Shared Drive"}
+                    {source.lastSyncedAt
+                      ? ` · Synced ${new Date(source.lastSyncedAt).toLocaleDateString()}`
+                      : " · Sync pending"}
+                    {source.syncPending ? " · Sync queued" : ""}
+                    {source.lastSyncStatus === "failed" ? " · Last sync failed" : ""}
+                    {` · ${source.indexedCount} indexed · ${source.skippedCount} skipped · ${source.errorCount} errors`}
+                  </span>
+                </span>
+                <div className="connection-row-actions">
+                  <Badge tone={source.status === "active" ? "success" : "warning"}>
+                    {source.status === "active"
+                      ? "Active"
+                      : source.status === "needs_auth"
+                        ? "Reconnect account"
+                        : "Disabled"}
+                  </Badge>
+                  {source.status === "active" && canSyncSources ? (
+                    <InlineActionForm
+                      action={syncGoogleDriveAction}
+                      fieldName="sourceId"
+                      label="Sync"
+                      value={source.id}
+                    />
+                  ) : null}
+                  {canManageSources ? (
+                    <RemoveSourceAction
+                      action={removeGoogleDriveSourceAction}
+                      sourceId={source.id}
+                    />
+                  ) : null}
+                </div>
+              </>
+            )}
+          />
         </Card>
 
         <Card className="connection-card">

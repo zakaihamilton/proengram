@@ -47,15 +47,6 @@ export function getGoogleDriveOAuthConfiguration(): GoogleDriveOAuthConfiguratio
   };
 }
 
-export function isGoogleDriveOAuthConfigured(): boolean {
-  try {
-    getGoogleDriveOAuthConfiguration();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function createGoogleDriveAuthorizationUrl(input: {
   state: string;
   codeChallenge: string;

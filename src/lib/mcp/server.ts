@@ -21,6 +21,7 @@ import {
   saveResult,
   searchBrainItems,
   searchBrainItemsByKind,
+  type BrainItem,
 } from "@/lib/db/brain";
 import { getPool, isDatabaseConfigured } from "@/lib/db/pool";
 import {
@@ -82,6 +83,10 @@ const READ_ONLY_ANNOTATIONS = {
 } as const;
 
 const organizationIdSchema = z.string().trim().min(1).max(128).optional();
+const citationsSchema = z
+  .array(z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }))
+  .max(30)
+  .optional();
 
 async function authorizeBrainRead(principal: McpPrincipal, organizationId?: string) {
   const organization = resolveMcpOrganization(principal, organizationId);
@@ -93,6 +98,22 @@ async function authorizeBrainRead(principal: McpPrincipal, organizationId?: stri
     organization.organizationId,
   );
   return { organization, canReadPolicies };
+}
+
+async function readKnowledgeItem(
+  principal: McpPrincipal,
+  id: string,
+  organizationId: string | undefined,
+  render: (item: BrainItem, organizationId: string) => unknown | Promise<unknown>,
+) {
+  const { organization, canReadPolicies } = await authorizeBrainRead(principal, organizationId);
+  const item = await getBrainItem(
+    organization.organizationId,
+    id,
+    canReadPolicies ? undefined : "sentry8_policy",
+  );
+  if (!item) return textResult("That company knowledge item was not found.", true);
+  return textResult(await render(item, organization.organizationId));
 }
 
 function createServer(principal: McpPrincipal): McpServer {
@@ -179,23 +200,15 @@ function createServer(principal: McpPrincipal): McpServer {
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ id, limit, organizationId }) =>
-      withToolErrors(async () => {
-        const { organization, canReadPolicies } = await authorizeBrainRead(
-          principal,
-          organizationId,
-        );
-        const item = await getBrainItem(
-          organization.organizationId,
-          id,
-          canReadPolicies ? undefined : "sentry8_policy",
-        );
-        if (!item) return textResult("That company knowledge item was not found.", true);
-        return textResult({
-          id,
-          title: item.title,
-          history: await getBrainItemHistory(organization.organizationId, id, limit ?? 20),
-        });
-      }),
+      withToolErrors(() =>
+        readKnowledgeItem(principal, id, organizationId, (item, resolvedOrganizationId) =>
+          getBrainItemHistory(resolvedOrganizationId, id, limit ?? 20).then((history) => ({
+            id,
+            title: item.title,
+            history,
+          })),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -250,19 +263,7 @@ function createServer(principal: McpPrincipal): McpServer {
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async ({ id, organizationId }) =>
-      withToolErrors(async () => {
-        const { organization, canReadPolicies } = await authorizeBrainRead(
-          principal,
-          organizationId,
-        );
-        const item = await getBrainItem(
-          organization.organizationId,
-          id,
-          canReadPolicies ? undefined : "sentry8_policy",
-        );
-        if (!item) return textResult("That company knowledge item was not found.", true);
-        return textResult(item);
-      }),
+      withToolErrors(() => readKnowledgeItem(principal, id, organizationId, (item) => item)),
   );
 
   server.registerTool(
@@ -313,12 +314,7 @@ function createServer(principal: McpPrincipal): McpServer {
         title: z.string().trim().min(1).max(240),
         markdown: z.string().trim().min(1).max(30_000),
         organizationId: organizationIdSchema,
-        citations: z
-          .array(
-            z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }),
-          )
-          .max(30)
-          .optional(),
+        citations: citationsSchema,
       },
       annotations: {
         readOnlyHint: false,
@@ -361,12 +357,7 @@ function createServer(principal: McpPrincipal): McpServer {
         markdown: z.string().trim().min(1).max(30_000),
         projectName: z.string().trim().min(1).max(160).optional(),
         occurredAt: z.string().datetime().optional(),
-        citations: z
-          .array(
-            z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }),
-          )
-          .max(30)
-          .optional(),
+        citations: citationsSchema,
         organizationId: organizationIdSchema,
       },
       annotations: {
