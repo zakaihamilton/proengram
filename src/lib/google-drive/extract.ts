@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { KnowledgeSegment } from "@/lib/knowledge/chunk";
 
-export const GOOGLE_DRIVE_MIME_TYPES = {
+const GOOGLE_DRIVE_MIME_TYPES = {
   document: "application/vnd.google-apps.document",
   spreadsheet: "application/vnd.google-apps.spreadsheet",
   presentation: "application/vnd.google-apps.presentation",

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { writeActivity } from "@/lib/db/brain";
 import { getPool } from "@/lib/db/pool";
+import { withDatabaseTransaction } from "@/lib/db/transaction";
 import {
   GoogleDriveApiError,
   type GoogleDriveFolder,
@@ -123,11 +124,7 @@ export async function connectGoogleDriveAccount(input: {
   token: GoogleDriveToken;
 }): Promise<void> {
   if (!isGoogleDriveConfigured()) throw new Error("Google Drive OAuth is not configured.");
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  await withDatabaseTransaction(async (client) => {
     const result = await client.query<{ id: string }>(
       `INSERT INTO google_drive_accounts
         (id, organization_id, google_subject, google_email, access_token_ciphertext,
@@ -172,13 +169,7 @@ export async function connectGoogleDriveAccount(input: {
       summary: `Connected Google Drive account ${input.profile.email}.`,
       metadata: { email: input.profile.email },
     });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function getGoogleDriveAccountConnection(
@@ -210,11 +201,7 @@ export async function getGoogleDriveAccountConnection(
 }
 
 export async function getGoogleDriveAccessToken(organizationId: string): Promise<string> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  const outcome = await withDatabaseTransaction(async (client) => {
     const result = await client.query<GoogleDriveAccountRow>(
       `SELECT * FROM google_drive_accounts
         WHERE organization_id = $1
@@ -226,9 +213,7 @@ export async function getGoogleDriveAccessToken(organizationId: string): Promise
       throw new Error("Reconnect Google Drive in Settings before syncing this source.");
     }
     if (timestamp(account.access_token_expires_at) > Date.now() + 60_000) {
-      const accessToken = decryptGoogleDriveToken(account.access_token_ciphertext);
-      await client.query("COMMIT");
-      return accessToken;
+      return { accessToken: decryptGoogleDriveToken(account.access_token_ciphertext), error: null };
     }
 
     let refreshed: Awaited<ReturnType<typeof refreshGoogleDriveAccessToken>>;
@@ -249,8 +234,7 @@ export async function getGoogleDriveAccessToken(organizationId: string): Promise
         [organizationId],
       );
       await deactivateOrganizationDriveItems(client, organizationId);
-      await client.query("COMMIT");
-      throw error;
+      return { accessToken: null, error };
     }
 
     await client.query(
@@ -261,14 +245,12 @@ export async function getGoogleDriveAccessToken(organizationId: string): Promise
         WHERE id = $1`,
       [account.id, encryptGoogleDriveToken(refreshed.accessToken), refreshed.accessTokenExpiresAt],
     );
-    await client.query("COMMIT");
-    return refreshed.accessToken;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+    return { accessToken: refreshed.accessToken, error: null };
+  });
+  if (outcome.error) throw outcome.error;
+  if (outcome.accessToken === null)
+    throw new Error("Google Drive access token could not be refreshed.");
+  return outcome.accessToken;
 }
 
 export async function listGoogleDriveSources(organizationId: string): Promise<GoogleDriveSource[]> {
@@ -349,7 +331,7 @@ export async function listAvailableGoogleSharedDrives(
   return listGoogleSharedDrives(await getGoogleDriveAccessToken(organizationId));
 }
 
-export async function listAvailableGoogleDriveFolders(
+async function listAvailableGoogleDriveFolders(
   organizationId: string,
   driveId: string,
 ): Promise<GoogleDriveFolder[]> {
@@ -377,11 +359,7 @@ export async function addGoogleDriveSource(input: {
   if (folderIds.some((id) => !folders.some((folder) => folder.id === id))) {
     throw new Error("One or more selected folders are not in the chosen Shared Drive.");
   }
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  return withDatabaseTransaction(async (client) => {
     const result = await client.query<{ id: string }>(
       `INSERT INTO google_drive_sources
         (id, organization_id, drive_id, drive_name, selected_folder_ids, status, updated_by_subject_id)
@@ -428,14 +406,8 @@ export async function addGoogleDriveSource(input: {
       summary: `Selected the Shared Drive ${drive.name} for company knowledge.`,
       metadata: { driveId: drive.id, folderCount: folderIds.length },
     });
-    await client.query("COMMIT");
     return sourceId;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function removeGoogleDriveSource(input: {
@@ -443,11 +415,7 @@ export async function removeGoogleDriveSource(input: {
   subjectId: string;
   sourceId: string;
 }): Promise<void> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  await withDatabaseTransaction(async (client) => {
     const source = await client.query<{ drive_name: string }>(
       `UPDATE google_drive_sources
           SET status = 'disabled', updated_at = now()
@@ -480,13 +448,7 @@ export async function removeGoogleDriveSource(input: {
       itemId: input.sourceId,
       summary: `Disconnected the Shared Drive ${source.rows[0].drive_name}.`,
     });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function disconnectGoogleDriveAccount(input: {
@@ -507,9 +469,7 @@ export async function disconnectGoogleDriveAccount(input: {
     // Continue removing the local grant even if Google has already revoked the token.
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  await withDatabaseTransaction(async (client) => {
     await client.query(
       `UPDATE google_drive_accounts
           SET status = 'reauthorize_required', access_token_ciphertext = '', refresh_token_ciphertext = '',
@@ -537,13 +497,7 @@ export async function disconnectGoogleDriveAccount(input: {
       itemId: account.id,
       summary: `Disconnected Google Drive account ${account.google_email}.`,
     });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, pool);
 }
 
 export async function enqueueGoogleDriveSyncJob(input: {
