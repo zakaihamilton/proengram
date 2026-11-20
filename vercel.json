@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build",
+  "schedules": {
+    "github-sync-worker": {
+      "path": "/api/cron/github-sync",
+      "requestMethod": "GET",
+      "schedule": "*/15 * * * *"
+    },
+    "github-daily-reconciliation": {
+      "path": "/api/cron/github-reconcile",
+      "requestMethod": "GET",
+      "schedule": "17 4 * * *"
+    },
+    "google-drive-sync-worker": {
+      "path": "/api/cron/google-drive-sync",
+      "requestMethod": "GET",
+      "schedule": "*/15 * * * *"
+    },
+    "google-drive-daily-reconciliation": {
+      "path": "/api/cron/google-drive-reconcile",
+      "requestMethod": "GET",
+      "schedule": "47 4 * * *"
+    }
+  }
+}

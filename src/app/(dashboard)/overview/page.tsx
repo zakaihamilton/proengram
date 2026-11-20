@@ -4,16 +4,26 @@ import { BrainItemCard } from "@/components/brain-item-card";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
 import { getOverview } from "@/lib/db/brain";
 import { isDatabaseConfigured } from "@/lib/db/pool";
-import { isGitHubConfigured } from "@/lib/github/github";
+import { isGitHubConfigured, listGitHubRepositorySources } from "@/lib/github/github";
+import { isGoogleDriveConfigured, listGoogleDriveSources } from "@/lib/google-drive/connections";
 
 export default async function OverviewPage() {
   const identity = await requireDashboardIdentity("brain:read");
   const canReadPolicies = await authorizeAppAction(identity, "policy:read").catch(() => false);
   let overview: Awaited<ReturnType<typeof getOverview>> = null;
+  let githubSourceReady = false;
+  let googleDriveSourceReady = false;
   let storageError = false;
   if (isDatabaseConfigured()) {
     try {
-      overview = await getOverview(identity.organization.organizationId, canReadPolicies);
+      const [loadedOverview, githubSources, googleDriveSources] = await Promise.all([
+        getOverview(identity.organization.organizationId, canReadPolicies),
+        listGitHubRepositorySources(identity.organization.organizationId),
+        listGoogleDriveSources(identity.organization.organizationId),
+      ]);
+      overview = loadedOverview;
+      githubSourceReady = githubSources.some((source) => source.status === "active");
+      googleDriveSourceReady = googleDriveSources.some((source) => source.status === "active");
     } catch {
       storageError = true;
     }
@@ -23,6 +33,8 @@ export default async function OverviewPage() {
   const mcpReady = Boolean(
     process.env.PERMINISTER_MCP_CLIENT_ID && process.env.PERMINISTER_MCP_CLIENT_SECRET,
   );
+  const githubReady = isGitHubConfigured() && githubSourceReady;
+  const googleDriveReady = isGoogleDriveConfigured() && googleDriveSourceReady;
 
   return (
     <main className="page-content">
@@ -30,7 +42,7 @@ export default async function OverviewPage() {
         <PageHeader
           eyebrow="COMPANY BRAIN"
           title="Overview"
-          description="A shared space for approved knowledge, useful answers, and policy context."
+          description="A shared, searchable record of company knowledge, decisions, project history, and source material."
           actions={
             <Link className="pf-button pf-button-primary" href="/knowledge">
               Search knowledge
@@ -44,10 +56,7 @@ export default async function OverviewPage() {
           <strong>
             {storageError ? "Nanogres database needs setup" : "Connect Nanogres to get started"}
           </strong>
-          <span>
-            {" "}
-            Add the server-only connection string, then apply the initial database migration.{" "}
-          </span>
+          <span> Configure Nanogres workload identity, then apply the database migrations. </span>
           <Link className="text-link" href="/settings">
             View setup
           </Link>
@@ -58,8 +67,8 @@ export default async function OverviewPage() {
         <Card className="metric-card">
           <div className="metric-label">
             GitHub documents{" "}
-            <Badge tone={isGitHubConfigured() ? "success" : "warning"}>
-              {isGitHubConfigured() ? "Connected" : "Setup needed"}
+            <Badge tone={githubReady ? "success" : "warning"}>
+              {githubReady ? "Connected" : "Setup needed"}
             </Badge>
           </div>
           <strong className="metric-value">
@@ -69,12 +78,38 @@ export default async function OverviewPage() {
         </Card>
         <Card className="metric-card">
           <div className="metric-label">
+            Google Drive documents{" "}
+            <Badge tone={googleDriveReady ? "success" : "warning"}>
+              {googleDriveReady ? "Connected" : "Setup needed"}
+            </Badge>
+          </div>
+          <strong className="metric-value">
+            {overview ? overview.counts.drive.toLocaleString() : "—"}
+          </strong>
+          <div className="metric-note">Docs, Sheets, Slides, and PDFs in selected scopes</div>
+        </Card>
+        <Card className="metric-card">
+          <div className="metric-label">
             Saved answers <Badge tone="neutral">Company shared</Badge>
           </div>
           <strong className="metric-value">
             {overview ? overview.counts.saved.toLocaleString() : "—"}
           </strong>
           <div className="metric-note">Answers explicitly saved by team members</div>
+        </Card>
+        <Card className="metric-card">
+          <div className="metric-label">Decisions</div>
+          <strong className="metric-value">
+            {overview ? overview.counts.decisions.toLocaleString() : "—"}
+          </strong>
+          <div className="metric-note">Explicitly saved organization decisions</div>
+        </Card>
+        <Card className="metric-card">
+          <div className="metric-label">Project updates</div>
+          <strong className="metric-value">
+            {overview ? overview.counts.projectUpdates.toLocaleString() : "—"}
+          </strong>
+          <div className="metric-note">Dated updates grouped by project</div>
         </Card>
         <Card className="metric-card">
           <div className="metric-label">
@@ -120,7 +155,7 @@ export default async function OverviewPage() {
               }
               description={
                 databaseReady
-                  ? "Sync GitHub Markdown or save a useful answer to start building the company brain."
+                  ? "Connect GitHub or Google Drive, or save a useful answer to start building the company brain."
                   : "Connect the Nanogres database to show shared knowledge and saved answers."
               }
               action={
@@ -160,9 +195,18 @@ export default async function OverviewPage() {
               <span>GitHub Markdown</span>
               <span
                 className="status-indicator"
-                data-status={isGitHubConfigured() ? "connected" : "not-connected"}
+                data-status={githubReady ? "connected" : "not-connected"}
               >
-                {isGitHubConfigured() ? "Ready to sync" : "Setup needed"}
+                {githubReady ? "Ready to sync" : "Setup needed"}
+              </span>
+            </div>
+            <div className="status-row">
+              <span>Google Drive</span>
+              <span
+                className="status-indicator"
+                data-status={googleDriveReady ? "connected" : "not-connected"}
+              >
+                {googleDriveReady ? "Ready to sync" : "Setup needed"}
               </span>
             </div>
             <div className="status-row">

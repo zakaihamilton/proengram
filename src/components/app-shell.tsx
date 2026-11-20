@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DashboardShell, ThemeControl } from "panel-frame-ui";
 import type { ReactNode } from "react";
+import { selectOrganizationAction } from "@/app/(dashboard)/organization-actions";
 import { BrandMark } from "./brand";
 
 const links = [
@@ -24,6 +25,12 @@ const links = [
     icon: "M12 3 20 6v6c0 5-3.5 8-8 11-4.5-3-8-6-8-11V6l8-3zM8.5 12l2.2 2.2 4.8-5",
   },
   { href: "/activity", label: "Activity", icon: "M4 17v-4M10 17V7M16 17v-7M22 17V4" },
+  {
+    href: "/feedback",
+    label: "Feedback",
+    icon: "M20 11.5a7.5 7.5 0 0 1-7.5 7.5H7l-4 2v-5A7.5 7.5 0 1 1 20 11.5zM8 11h8M8 14h5",
+    managerOnly: true,
+  },
   {
     href: "/settings",
     label: "Settings",
@@ -49,12 +56,16 @@ export function AppShell({
   children,
   userName,
   email,
-  organizationName,
+  organizationId,
+  organizations,
+  canReviewFeedback,
 }: {
   children: ReactNode;
   userName: string;
   email: string | null;
-  organizationName: string;
+  organizationId: string;
+  organizations: Array<{ organizationId: string; name: string }>;
+  canReviewFeedback: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -68,28 +79,52 @@ export function AppShell({
       }
       sidebarContext={
         <div className="workspace-context">
-          <span className="workspace-context-label">WORKSPACE</span>
-          <span className="workspace-context-name">{organizationName}</span>
+          <form action={selectOrganizationAction} className="workspace-context-form">
+            <label className="workspace-context-label" htmlFor="organization-switcher">
+              ORGANIZATION
+            </label>
+            <select
+              aria-label="Choose an organization"
+              className="workspace-context-select"
+              defaultValue={organizationId}
+              id="organization-switcher"
+              name="organizationId"
+              onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            >
+              {organizations.map((organization) => (
+                <option key={organization.organizationId} value={organization.organizationId}>
+                  {organization.name}
+                </option>
+              ))}
+            </select>
+            {organizations.length > 1 ? (
+              <button className="workspace-context-submit" type="submit">
+                Switch organization
+              </button>
+            ) : null}
+          </form>
         </div>
       }
       navigation={
         <nav aria-label="Main navigation" className="pf-sidebar-group">
           <p className="pf-sidebar-group-label">COMPANY BRAIN</p>
-          {links.map((link) => {
-            const active =
-              link.href === "/overview" ? pathname === link.href : pathname.startsWith(link.href);
-            return (
-              <Link
-                aria-current={active ? "page" : undefined}
-                className="pf-sidebar-link"
-                href={link.href}
-                key={link.href}
-              >
-                <NavIcon path={link.icon} />
-                <span>{link.label}</span>
-              </Link>
-            );
-          })}
+          {links
+            .filter((link) => !link.managerOnly || canReviewFeedback)
+            .map((link) => {
+              const active =
+                link.href === "/overview" ? pathname === link.href : pathname.startsWith(link.href);
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
+                  className="pf-sidebar-link"
+                  href={link.href}
+                  key={link.href}
+                >
+                  <NavIcon path={link.icon} />
+                  <span>{link.label}</span>
+                </Link>
+              );
+            })}
         </nav>
       }
       sidebarFooter={

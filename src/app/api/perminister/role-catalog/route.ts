@@ -13,7 +13,7 @@ export async function GET() {
           description: "Read the shared brain and knowledge base.",
           role: "viewer",
           scopeKinds: ["product"],
-          actions: ["brain:read"],
+          actions: ["brain:read", "brain:feedback"],
         },
         {
           id: "knowledge-contributor",
@@ -21,7 +21,7 @@ export async function GET() {
           description: "Read, save results, and propose knowledge updates.",
           role: "editor",
           scopeKinds: ["product"],
-          actions: ["brain:read", "result:save", "knowledge:propose"],
+          actions: ["brain:read", "brain:feedback", "result:save", "knowledge:propose"],
         },
         {
           id: "knowledge-manager",
@@ -31,9 +31,11 @@ export async function GET() {
           scopeKinds: ["product"],
           actions: [
             "brain:read",
+            "brain:feedback",
             "policy:read",
             "result:save",
             "knowledge:propose",
+            "source:manage",
             "source:sync",
           ],
         },
