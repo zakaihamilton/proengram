@@ -104,15 +104,17 @@ export async function importSentry8CatalogAction(formData: FormData): Promise<vo
       );
       const itemId = stored.rows[0]?.id;
       if (!itemId) throw new Error("A Sentry8 policy snapshot could not be retrieved.");
-      await writeItemVersion(client, {
+      const versionId = await writeItemVersion(client, {
         organizationId: identity.organization.organizationId,
         itemId,
+        title: rule.label,
         markdown,
         sourceRevision: catalog.revision,
       });
       await replaceBrainChunks(client, {
         organizationId: identity.organization.organizationId,
         itemId,
+        versionId,
         markdown,
         title: rule.label,
       });

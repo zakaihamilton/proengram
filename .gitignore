@@ -1,4 +1,5 @@
 .next/
+.cache/proengram-embeddings/
 node_modules/
 .env*
 !.env.example

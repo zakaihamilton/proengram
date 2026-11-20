@@ -435,7 +435,8 @@ select:focus-visible {
   margin: 22px 0 28px;
 }
 .search-form input,
-.preview-search {
+.preview-search,
+.knowledge-search-form > input {
   min-width: 0;
   flex: 1;
   min-height: 44px;
@@ -445,7 +446,9 @@ select:focus-visible {
   color: var(--ink);
   background: var(--surface);
 }
-.search-form button {
+.search-form button,
+.knowledge-search-form > button,
+.search-filter-actions > button {
   min-height: 44px;
   padding: 0 18px;
   border: 0;
@@ -454,6 +457,117 @@ select:focus-visible {
   background: var(--accent);
   font-weight: 650;
   cursor: pointer;
+}
+.knowledge-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 22px 0 28px;
+}
+.search-filters {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+.search-filters .pf-field {
+  min-width: 0;
+}
+.search-filters .pf-input {
+  min-height: 40px;
+}
+.search-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.search-history-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.search-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.search-filter-actions > button {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.suggestion-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+.suggestion-card {
+  padding: 20px 22px;
+}
+.suggestion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.suggestion-body {
+  max-width: none;
+  margin: 18px 0;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.suggestion-citations h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.suggestion-citations ul {
+  margin: 0 0 18px;
+  padding-left: 18px;
+}
+.review-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.knowledge-edit-card {
+  margin-top: 20px;
+}
+.revision-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 780px) {
+  .search-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .knowledge-search-form {
+    grid-template-columns: 1fr;
+  }
+  .knowledge-search-form > button {
+    width: 100%;
+  }
+  .search-filters {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+  .suggestion-card {
+    padding: 17px;
+  }
 }
 .result-layout {
   display: grid;
@@ -773,6 +887,13 @@ select:focus-visible {
   display: grid;
   gap: 12px;
   padding-left: 18px;
+}
+.revision-entry {
+  display: grid;
+  gap: 4px;
+}
+.revision-entry details {
+  margin-top: 4px;
 }
 .revision-list summary {
   cursor: pointer;

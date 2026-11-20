@@ -933,8 +933,7 @@ export async function syncGitHubMarkdown(
       );
       const current = currentSource.rows[0];
       if (
-        !current ||
-        current.status !== "active" ||
+        current?.status !== "active" ||
         current.organization_account_id !== source.organizationAccountId ||
         current.default_branch !== source.defaultBranch
       ) {
@@ -980,15 +979,17 @@ export async function syncGitHubMarkdown(
         );
         const itemId = stored.rows[0]?.id;
         if (!itemId) throw new Error("A synced GitHub document could not be retrieved.");
-        await writeItemVersion(client, {
+        const versionId = await writeItemVersion(client, {
           organizationId,
           itemId,
+          title: title.slice(0, 240),
           markdown: document.markdown,
           sourceRevision: document.sha,
         });
         await replaceBrainChunks(client, {
           organizationId,
           itemId,
+          versionId,
           markdown: document.markdown,
           title: title.slice(0, 240),
         });

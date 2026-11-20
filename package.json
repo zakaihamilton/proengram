@@ -8,7 +8,10 @@
     "node": ">=24.22.1 <25"
   },
   "scripts": {
+    "prepare:embedding-model": "node scripts/prepare-embedding-model.mjs",
+    "predev": "pnpm prepare:embedding-model",
     "dev": "next dev --webpack",
+    "prebuild": "pnpm prepare:embedding-model",
     "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit --incremental false",
@@ -24,6 +27,7 @@
     "health:duplication": "jscpd src"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
     "@modelcontextprotocol/sdk": "1.32.1",
     "exceljs": "4.4.0",
     "jose": "^6.2.17",
