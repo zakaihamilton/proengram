@@ -1,3 +1,6 @@
 allowBuilds:
   cpu-features: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
   ssh2: true
