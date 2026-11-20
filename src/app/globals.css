@@ -132,35 +132,8 @@ select:focus-visible {
   gap: 7px;
   min-width: 0;
 }
-.workspace-context-select {
+.workspace-context-switcher {
   width: 100%;
-  min-width: 0;
-  padding: 8px 28px 8px 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
-.workspace-context-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.workspace-context-submit {
-  justify-self: start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.workspace-context-submit:hover {
-  color: var(--ink);
 }
 .sidebar-footnote {
   display: flex;

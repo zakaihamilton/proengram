@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { DashboardShell, ThemeControl } from "panel-frame-ui";
+import { ContextSwitcher, DashboardShell, ThemeControl } from "panel-frame-ui";
 import type { ReactNode } from "react";
 import { selectOrganizationAction } from "@/app/(dashboard)/organization-actions";
 import { BrandMark } from "./brand";
@@ -88,28 +88,20 @@ export function AppShell({
       sidebarContext={
         <div className="workspace-context">
           <form action={selectOrganizationAction} className="workspace-context-form">
-            <label className="workspace-context-label" htmlFor="organization-switcher">
-              ORGANIZATION
-            </label>
-            <select
+            <span className="workspace-context-label">ORGANIZATION</span>
+            <ContextSwitcher
               aria-label="Choose an organization"
-              className="workspace-context-select"
+              className="workspace-context-switcher"
               defaultValue={organizationId}
-              id="organization-switcher"
+              disabled={organizations.length < 2}
+              label="Organization"
               name="organizationId"
-              onChange={(event) => event.currentTarget.form?.requestSubmit()}
-            >
-              {organizations.map((organization) => (
-                <option key={organization.organizationId} value={organization.organizationId}>
-                  {organization.name}
-                </option>
-              ))}
-            </select>
-            {organizations.length > 1 ? (
-              <button className="workspace-context-submit" type="submit">
-                Switch organization
-              </button>
-            ) : null}
+              options={organizations.map((organization) => ({
+                value: organization.organizationId,
+                label: organization.name,
+              }))}
+              submitOnSelect
+            />
           </form>
         </div>
       }

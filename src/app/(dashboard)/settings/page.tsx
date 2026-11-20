@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Alert, Badge, Card, PageHeader } from "panel-frame-ui";
+import { Alert, Badge, Card, PageHeader, Select } from "panel-frame-ui";
 import { getMcpResourceUri, getPerministerBaseUrl, getPublicOrigin } from "@/lib/auth/config";
 import { protectedResourceMetadataUrl } from "@/lib/auth/protected-resource";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
@@ -437,18 +437,23 @@ export default async function SettingsPage({
                         </p>
                       ) : availableRepositories.length ? (
                         <>
-                          <label className="pf-field">
-                            <span className="pf-field-label">Available repositories</span>
-                            <select className="pf-input" name="repository" required>
-                              <option value="">Select a repository</option>
-                              {availableRepositories.map((repository) => (
-                                <option key={repository.id} value={repository.fullName}>
+                          <Select
+                            defaultValue=""
+                            label="Available repositories"
+                            name="repository"
+                            options={availableRepositories.map((repository) => ({
+                              value: repository.fullName,
+                              label: (
+                                <>
                                   {repository.fullName} ·{" "}
                                   {repository.isPrivate ? "Private" : "Public"}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                                </>
+                              ),
+                              searchLabel: repository.fullName,
+                            }))}
+                            placeholder="Select a repository"
+                            required
+                          />
                           <button className="pf-button pf-button-secondary" type="submit">
                             Add repository
                           </button>

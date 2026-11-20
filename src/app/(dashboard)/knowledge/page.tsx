@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Alert, EmptyState, PageHeader } from "panel-frame-ui";
+import { Alert, EmptyState, PageHeader, Select } from "panel-frame-ui";
 import { BrainItemList } from "@/components/brain-item-list";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
 import {
@@ -117,30 +117,26 @@ export default async function KnowledgePage({
           />
           <button type="submit">Search</button>
           <div className="search-filters">
-            <label className="pf-field">
-              <span className="pf-field-label">Type</span>
-              <select className="pf-input" defaultValue={filters.kind ?? ""} name="kind">
-                <option value="">All types</option>
-                {kinds
+            <Select
+              defaultValue={filters.kind ?? ""}
+              label="Type"
+              name="kind"
+              options={[
+                { value: "", label: "All types" },
+                ...kinds
                   .filter((kind) => canReadPolicies || kind.value !== "sentry8_policy")
-                  .map((kind) => (
-                    <option key={kind.value} value={kind.value}>
-                      {kind.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="pf-field">
-              <span className="pf-field-label">Source</span>
-              <select className="pf-input" defaultValue={filters.sourceId ?? ""} name="sourceId">
-                <option value="">All sources</option>
-                {sources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                  .map((kind) => ({ value: kind.value, label: kind.label })),
+              ]}
+            />
+            <Select
+              defaultValue={filters.sourceId ?? ""}
+              label="Source"
+              name="sourceId"
+              options={[
+                { value: "", label: "All sources" },
+                ...sources.map((source) => ({ value: source.id, label: source.label })),
+              ]}
+            />
             <label className="pf-field">
               <span className="pf-field-label">Project</span>
               <input
@@ -172,31 +168,27 @@ export default async function KnowledgePage({
               <span className="pf-field-label">To</span>
               <input className="pf-input" defaultValue={filters.dateTo} name="dateTo" type="date" />
             </label>
-            <label className="pf-field">
-              <span className="pf-field-label">Latest source sync</span>
-              <select
-                className="pf-input"
-                defaultValue={filters.syncStatus ?? ""}
-                name="syncStatus"
-              >
-                <option value="">Any status</option>
-                <option value="running">Running</option>
-                <option value="succeeded">Succeeded</option>
-                <option value="failed">Failed</option>
-              </select>
-            </label>
-            <label className="pf-field">
-              <span className="pf-field-label">Sort</span>
-              <select
-                className="pf-input"
-                defaultValue={filters.sortBy ?? "relevance"}
-                name="sortBy"
-              >
-                <option value="relevance">Relevance</option>
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-              </select>
-            </label>
+            <Select
+              defaultValue={filters.syncStatus ?? ""}
+              label="Latest source sync"
+              name="syncStatus"
+              options={[
+                { value: "", label: "Any status" },
+                { value: "running", label: "Running" },
+                { value: "succeeded", label: "Succeeded" },
+                { value: "failed", label: "Failed" },
+              ]}
+            />
+            <Select
+              defaultValue={filters.sortBy ?? "relevance"}
+              label="Sort"
+              name="sortBy"
+              options={[
+                { value: "relevance", label: "Relevance" },
+                { value: "newest", label: "Newest" },
+                { value: "oldest", label: "Oldest" },
+              ]}
+            />
             <label className="search-history-toggle">
               <input
                 defaultChecked={filters.includeHistory}
