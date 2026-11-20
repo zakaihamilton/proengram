@@ -920,6 +920,26 @@ export async function syncGitHubMarkdown(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const currentSource = await client.query<{
+        organization_account_id: string | null;
+        default_branch: string;
+        status: string;
+      }>(
+        `SELECT organization_account_id, default_branch, status
+           FROM github_repository_sources
+          WHERE organization_id = $1 AND id = $2
+          FOR UPDATE`,
+        [organizationId, source.id],
+      );
+      const current = currentSource.rows[0];
+      if (
+        !current ||
+        current.status !== "active" ||
+        current.organization_account_id !== source.organizationAccountId ||
+        current.default_branch !== source.defaultBranch
+      ) {
+        throw new Error("The GitHub source changed during sync. Queue another sync to refresh it.");
+      }
       await client.query(
         `UPDATE brain_items
             SET is_active = false, updated_at = now()
