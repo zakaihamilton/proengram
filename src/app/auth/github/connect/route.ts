@@ -1,5 +1,4 @@
 import { startOAuthConnection } from "@/lib/auth/oauth-routes";
-import { getPublicOrigin } from "@/lib/auth/config";
 import { createGitHubAuthorizationUrl, getGitHubOAuthConfiguration } from "@/lib/github/oauth";
 import { getGitHubOAuthStateCookieName, signGitHubOAuthState } from "@/lib/github/oauth-state";
 import { isGitHubTokenEncryptionConfigured } from "@/lib/github/token-crypto";
