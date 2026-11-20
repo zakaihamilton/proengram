@@ -162,6 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  onnxruntime-node@1.21.0: 9ab329cfbea0c54b6471897134e3e2ed4ca48abd19d0b7039cc8de1d7d08ef95
+
 importers:
 
   .:
@@ -2770,7 +2773,7 @@ snapshots:
   '@huggingface/transformers@3.8.1':
     dependencies:
       '@huggingface/jinja': 0.5.13
-      onnxruntime-node: 1.21.0
+      onnxruntime-node: 1.21.0(patch_hash=9ab329cfbea0c54b6471897134e3e2ed4ca48abd19d0b7039cc8de1d7d08ef95)
       onnxruntime-web: 1.22.0-dev.20250409-89f8206ba4
       sharp: 0.34.5
 
@@ -4294,7 +4297,7 @@ snapshots:
 
   onnxruntime-common@1.22.0-dev.20250409-89f8206ba4: {}
 
-  onnxruntime-node@1.21.0:
+  onnxruntime-node@1.21.0(patch_hash=9ab329cfbea0c54b6471897134e3e2ed4ca48abd19d0b7039cc8de1d7d08ef95):
     dependencies:
       global-agent: 3.0.0
       onnxruntime-common: 1.21.0

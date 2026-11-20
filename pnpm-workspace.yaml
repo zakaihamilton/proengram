@@ -4,3 +4,5 @@ allowBuilds:
   protobufjs: true
   sharp: true
   ssh2: true
+patchedDependencies:
+  onnxruntime-node@1.21.0: patches/onnxruntime-node@1.21.0.patch
