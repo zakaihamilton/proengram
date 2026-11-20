@@ -95,6 +95,14 @@ const citationsSchema = z
   .array(z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }))
   .max(30)
   .optional();
+const knowledgeContentSchema = {
+  title: z.string().trim().min(1).max(240),
+  markdown: z.string().trim().min(1).max(30_000),
+  projectName: z.string().trim().min(1).max(160).optional(),
+  occurredAt: z.string().datetime().optional(),
+  citations: citationsSchema,
+  organizationId: organizationIdSchema,
+};
 
 async function authorizeBrainRead(principal: McpPrincipal, organizationId?: string) {
   const organization = resolveMcpOrganization(principal, organizationId);
@@ -428,12 +436,7 @@ function createServer(principal: McpPrincipal): McpServer {
         "Publish an explicitly requested decision or project update to the shared company brain immediately. The MCP client supplies and summarizes the memory; ProEngram does not run background AI extraction. Project updates require a project name. Pass organizationId when your account has multiple organizations.",
       inputSchema: {
         recordType: z.enum(["decision", "project_update"]),
-        title: z.string().trim().min(1).max(240),
-        markdown: z.string().trim().min(1).max(30_000),
-        projectName: z.string().trim().min(1).max(160).optional(),
-        occurredAt: z.string().datetime().optional(),
-        citations: citationsSchema,
-        organizationId: organizationIdSchema,
+        ...knowledgeContentSchema,
       },
       annotations: {
         readOnlyHint: false,
@@ -480,12 +483,7 @@ function createServer(principal: McpPrincipal): McpServer {
         requestId: z.string().uuid(),
         employeeConfirmed: z.literal(true),
         kind: z.enum(["saved_answer", "decision_record", "project_update"]),
-        title: z.string().trim().min(1).max(240),
-        markdown: z.string().trim().min(1).max(30_000),
-        projectName: z.string().trim().min(1).max(160).optional(),
-        occurredAt: z.string().datetime().optional(),
-        citations: citationsSchema,
-        organizationId: organizationIdSchema,
+        ...knowledgeContentSchema,
       },
       annotations: {
         readOnlyHint: false,

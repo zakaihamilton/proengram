@@ -53,13 +53,18 @@ function readContent(formData: FormData): {
   };
 }
 
-export async function editKnowledgeItemAction(formData: FormData): Promise<void> {
+async function getEditableContent(formData: FormData) {
   const itemId = String(formData.get("itemId") ?? "");
   const identity = await getDashboardIdentity();
   if (!identity) redirect("/login");
   if (!(await authorizeAppAction(identity, "result:save"))) redirect("/access-denied");
   const content = readContent(formData);
   if (!content) redirect(`/knowledge/${itemId}?error=edit-invalid`);
+  return { identity, content };
+}
+
+export async function editKnowledgeItemAction(formData: FormData): Promise<void> {
+  const { identity, content } = await getEditableContent(formData);
   try {
     await updateOwnedKnowledgeItem({
       organizationId: identity.organization.organizationId,
@@ -76,12 +81,7 @@ export async function editKnowledgeItemAction(formData: FormData): Promise<void>
 }
 
 export async function suggestKnowledgeEditAction(formData: FormData): Promise<void> {
-  const itemId = String(formData.get("itemId") ?? "");
-  const identity = await getDashboardIdentity();
-  if (!identity) redirect("/login");
-  if (!(await authorizeAppAction(identity, "result:save"))) redirect("/access-denied");
-  const content = readContent(formData);
-  if (!content) redirect(`/knowledge/${itemId}?error=edit-invalid`);
+  const { identity, content } = await getEditableContent(formData);
   try {
     await submitKnowledgeEditSuggestion({
       organizationId: identity.organization.organizationId,
@@ -96,7 +96,7 @@ export async function suggestKnowledgeEditAction(formData: FormData): Promise<vo
       citations: content.citations,
     });
   } catch {
-    redirect(`/knowledge/${itemId}?error=edit-failed`);
+    redirect(`/knowledge/${content.itemId}?error=edit-failed`);
   }
   revalidatePath("/knowledge/review");
   redirect(`/knowledge/${content.itemId}?suggested=1`);

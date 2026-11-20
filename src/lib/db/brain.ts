@@ -48,6 +48,15 @@ export type BrainItemVersion = {
   citations: Array<{ title: string; url: string }>;
 };
 
+type KnowledgeContentInput = {
+  itemKind: "saved_answer" | "decision_record" | "project_update";
+  title: string;
+  markdown: string;
+  projectName?: string | null;
+  occurredAt?: string | null;
+  citations: Array<{ title: string; url: string }>;
+};
+
 export type BrainSearchFilters = {
   kind?: BrainItemKind;
   sourceId?: string;
@@ -430,7 +439,11 @@ export async function getBrainItemHistory(
       LIMIT $3`,
     [organizationId, itemId, limit],
   );
-  return result.rows.map((row) => ({
+  return result.rows.map(mapBrainItemVersion);
+}
+
+function mapBrainItemVersion(row: Record<string, unknown>): BrainItemVersion {
+  return {
     id: String(row.id),
     title: String(row.title),
     sourceRevision: typeof row.source_revision === "string" ? row.source_revision : null,
@@ -440,7 +453,7 @@ export async function getBrainItemHistory(
     projectName: typeof row.project_name === "string" ? row.project_name : null,
     occurredAt: nullableIso(row.occurred_at),
     citations: mapCitations(row.citations),
-  }));
+  };
 }
 
 export async function getBrainItemVersion(
@@ -464,17 +477,7 @@ export async function getBrainItemVersion(
   );
   const row = result.rows[0];
   if (!row) return null;
-  return {
-    id: String(row.id),
-    title: String(row.title),
-    sourceRevision: typeof row.source_revision === "string" ? row.source_revision : null,
-    sourceModifiedAt: nullableIso(row.source_modified_at),
-    observedAt: new Date(String(row.observed_at)).toISOString(),
-    markdown: String(row.markdown),
-    projectName: typeof row.project_name === "string" ? row.project_name : null,
-    occurredAt: nullableIso(row.occurred_at),
-    citations: mapCitations(row.citations),
-  };
+  return mapBrainItemVersion(row);
 }
 
 export async function listKnowledgeSearchSources(
@@ -895,32 +898,24 @@ async function submitKnowledgeSuggestion(
   });
 }
 
-export function submitKnowledgeCapture(input: {
-  organizationId: string;
-  subjectId: string;
-  requestId: string;
-  itemKind: "saved_answer" | "decision_record" | "project_update";
-  title: string;
-  markdown: string;
-  projectName?: string | null;
-  occurredAt?: string | null;
-  citations: Array<{ title: string; url: string }>;
-}): Promise<KnowledgeSuggestion> {
+export function submitKnowledgeCapture(
+  input: {
+    organizationId: string;
+    subjectId: string;
+    requestId: string;
+  } & KnowledgeContentInput,
+): Promise<KnowledgeSuggestion> {
   return submitKnowledgeSuggestion({ ...input, suggestionType: "capture" });
 }
 
-export function submitKnowledgeEditSuggestion(input: {
-  organizationId: string;
-  subjectId: string;
-  requestId: string;
-  targetItemId: string;
-  itemKind: "saved_answer" | "decision_record" | "project_update";
-  title: string;
-  markdown: string;
-  projectName?: string | null;
-  occurredAt?: string | null;
-  citations: Array<{ title: string; url: string }>;
-}): Promise<KnowledgeSuggestion> {
+export function submitKnowledgeEditSuggestion(
+  input: {
+    organizationId: string;
+    subjectId: string;
+    requestId: string;
+    targetItemId: string;
+  } & KnowledgeContentInput,
+): Promise<KnowledgeSuggestion> {
   return submitKnowledgeSuggestion({ ...input, suggestionType: "edit" });
 }
 
@@ -947,17 +942,13 @@ export async function listPendingKnowledgeSuggestions(
   return result.rows.map(mapSuggestion);
 }
 
-export async function updateOwnedKnowledgeItem(input: {
-  organizationId: string;
-  subjectId: string;
-  itemId: string;
-  itemKind: "saved_answer" | "decision_record" | "project_update";
-  title: string;
-  markdown: string;
-  projectName?: string | null;
-  occurredAt?: string | null;
-  citations: Array<{ title: string; url: string }>;
-}): Promise<void> {
+export async function updateOwnedKnowledgeItem(
+  input: {
+    organizationId: string;
+    subjectId: string;
+    itemId: string;
+  } & KnowledgeContentInput,
+): Promise<void> {
   await withDatabaseTransaction(async (client) => {
     const result = await client.query<{ title: string }>(
       `UPDATE brain_items

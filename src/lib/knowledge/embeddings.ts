@@ -3,9 +3,9 @@ import "server-only";
 import { env, pipeline, type FeatureExtractionPipelineType } from "@huggingface/transformers";
 import { resolve } from "node:path";
 
-export const EMBEDDING_DIMENSIONS = 384;
-export const EMBEDDING_MODEL_ID = "onnx-community/paraphrase-multilingual-MiniLM-L12-v2-ONNX";
-export const EMBEDDING_MODEL_REVISION = "d4c06bf";
+const EMBEDDING_DIMENSIONS = 384;
+const EMBEDDING_MODEL_ID = "onnx-community/paraphrase-multilingual-MiniLM-L12-v2-ONNX";
+const EMBEDDING_MODEL_REVISION = "d4c06bf";
 export const EMBEDDING_MODEL_VERSION = `${EMBEDDING_MODEL_ID}@${EMBEDDING_MODEL_REVISION}:q8`;
 
 let extractorPromise: Promise<FeatureExtractionPipelineType> | undefined;
