@@ -7,22 +7,27 @@ import { z } from "zod";
 import {
   authorizeMcpAction,
   McpAuthError,
-  resolveMcpOrganization,
   type McpPrincipal,
+  resolveMcpOrganization,
 } from "@/lib/auth/mcp";
+import {
+  getBrainItem,
+  getBrainItemHistory,
+  getProjectHistory,
+  type KnowledgeFeedbackRating,
+  listItemsByKind,
+  saveKnowledgeFeedback,
+  saveMemory,
+  saveResult,
+  searchBrainItems,
+  searchBrainItemsByKind,
+} from "@/lib/db/brain";
+import { getPool, isDatabaseConfigured } from "@/lib/db/pool";
 import {
   createMarkdownPullRequest,
   isGitHubConfigured,
   listGitHubRepositorySources,
 } from "@/lib/github/github";
-import {
-  getBrainItem,
-  listItemsByKind,
-  searchBrainItems,
-  searchBrainItemsByKind,
-  saveResult,
-} from "@/lib/db/brain";
-import { getPool, isDatabaseConfigured } from "@/lib/db/pool";
 
 function textResult(value: unknown, isError = false) {
   return {
@@ -109,7 +114,7 @@ function createServer(principal: McpPrincipal): McpServer {
     {
       title: "Search company knowledge",
       description:
-        "Search approved GitHub Markdown, company-saved answers, and imported Sentry8 policy snapshots. Pass organizationId when your account has multiple ProEngram organizations.",
+        "Search approved GitHub and Google Drive documents, saved answers, decisions, project history, and imported Sentry8 policy snapshots. Pass organizationId when your account has multiple ProEngram organizations.",
       inputSchema: {
         query: z.string().trim().min(1).max(500),
         limit: z.number().int().min(1).max(20).optional(),
@@ -147,10 +152,86 @@ function createServer(principal: McpPrincipal): McpServer {
             id: item.id,
             kind: item.kind,
             title: item.title,
-            excerpt: item.markdown.slice(0, 1800),
+            excerpt: (item.matchExcerpt ?? item.markdown).slice(0, 1800),
             sourceUrl: item.sourceUrl,
             sourceRevision: item.sourceRevision,
+            sourceModifiedAt: item.sourceModifiedAt,
+            locator: item.matchLocator,
+            projectName: item.projectName,
+            occurredAt: item.occurredAt,
             updatedAt: item.updatedAt,
+          })),
+        );
+      }),
+  );
+
+  server.registerTool(
+    "get_document_history",
+    {
+      title: "Read knowledge item history",
+      description:
+        "Read the indexed revision history for a company knowledge item. History begins at its first ProEngram sync; prior revisions are not guaranteed. Pass organizationId when your account has multiple organizations.",
+      inputSchema: {
+        id: z.string().uuid(),
+        limit: z.number().int().min(1).max(50).optional(),
+        organizationId: organizationIdSchema,
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ id, limit, organizationId }) =>
+      withToolErrors(async () => {
+        const { organization, canReadPolicies } = await authorizeBrainRead(
+          principal,
+          organizationId,
+        );
+        const item = await getBrainItem(
+          organization.organizationId,
+          id,
+          canReadPolicies ? undefined : "sentry8_policy",
+        );
+        if (!item) return textResult("That company knowledge item was not found.", true);
+        return textResult({
+          id,
+          title: item.title,
+          history: await getBrainItemHistory(organization.organizationId, id, limit ?? 20),
+        });
+      }),
+  );
+
+  server.registerTool(
+    "list_project_history",
+    {
+      title: "List project decisions and updates",
+      description:
+        "List explicitly saved decisions and project updates for a project, newest first. Pass organizationId when your account has multiple organizations.",
+      inputSchema: {
+        projectName: z.string().trim().min(1).max(160),
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        organizationId: organizationIdSchema,
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ projectName, from, to, limit, organizationId }) =>
+      withToolErrors(async () => {
+        const { organization } = await authorizeBrainRead(principal, organizationId);
+        const history = await getProjectHistory(
+          organization.organizationId,
+          projectName,
+          from,
+          to,
+          limit ?? 50,
+        );
+        return textResult(
+          history.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            markdown: item.markdown,
+            projectName: item.projectName,
+            occurredAt: item.occurredAt,
+            citations: item.citations,
           })),
         );
       }),
@@ -265,6 +346,105 @@ function createServer(principal: McpPrincipal): McpServer {
           visibility: "company",
           citations: item.citations,
         });
+      }),
+  );
+
+  server.registerTool(
+    "save_memory",
+    {
+      title: "Save a decision or project update",
+      description:
+        "Publish an explicitly requested decision or project update to the shared company brain immediately. The MCP client supplies and summarizes the memory; ProEngram does not run background AI extraction. Project updates require a project name. Pass organizationId when your account has multiple organizations.",
+      inputSchema: {
+        recordType: z.enum(["decision", "project_update"]),
+        title: z.string().trim().min(1).max(240),
+        markdown: z.string().trim().min(1).max(30_000),
+        projectName: z.string().trim().min(1).max(160).optional(),
+        occurredAt: z.string().datetime().optional(),
+        citations: z
+          .array(
+            z.object({ title: z.string().trim().min(1).max(240), url: z.string().url().max(2048) }),
+          )
+          .max(30)
+          .optional(),
+        organizationId: organizationIdSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ recordType, title, markdown, projectName, occurredAt, citations, organizationId }) =>
+      withToolErrors(async () => {
+        if (recordType === "project_update" && !projectName) {
+          throw new Error("Project updates require a projectName.");
+        }
+        const organization = resolveMcpOrganization(principal, organizationId);
+        await authorizeMcpAction(principal, "result:save", organization.organizationId);
+        requireDatabase();
+        const item = await saveMemory({
+          organizationId: organization.organizationId,
+          subjectId: principal.subjectId,
+          recordType,
+          title,
+          markdown,
+          projectName: projectName ?? null,
+          occurredAt: occurredAt ? new Date(occurredAt).toISOString() : new Date().toISOString(),
+          citations: citations ?? [],
+        });
+        return textResult({
+          saved: true,
+          id: item.id,
+          kind: item.kind,
+          title: item.title,
+          projectName: item.projectName,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "submit_knowledge_feedback",
+    {
+      title: "Submit knowledge feedback",
+      description:
+        "Mark a company knowledge item as helpful, incorrect, outdated, or missing context. A short note is optional. Pass organizationId when your account has multiple organizations.",
+      inputSchema: {
+        itemId: z.string().uuid(),
+        rating: z.enum(["helpful", "incorrect", "outdated", "missing_context"]),
+        note: z.string().trim().max(500).optional(),
+        organizationId: organizationIdSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ itemId, rating, note, organizationId }) =>
+      withToolErrors(async () => {
+        const { organization, canReadPolicies } = await authorizeBrainRead(
+          principal,
+          organizationId,
+        );
+        const item = await getBrainItem(
+          organization.organizationId,
+          itemId,
+          canReadPolicies ? undefined : "sentry8_policy",
+        );
+        if (!item) return textResult("That company knowledge item was not found.", true);
+        await authorizeMcpAction(principal, "brain:feedback", organization.organizationId);
+        requireDatabase();
+        const feedback = await saveKnowledgeFeedback({
+          organizationId: organization.organizationId,
+          subjectId: principal.subjectId,
+          itemId,
+          rating: rating as KnowledgeFeedbackRating,
+          note: note || null,
+        });
+        return textResult({ submitted: true, ...feedback });
       }),
   );
 

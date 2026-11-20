@@ -736,6 +736,52 @@ select:focus-visible {
 .connection-action {
   margin-top: 16px;
 }
+.choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.choice-row input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.feedback-list {
+  display: grid;
+  gap: 16px;
+}
+.feedback-card h2 {
+  margin: 12px 0 4px;
+  font-size: 19px;
+}
+.feedback-note {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  line-height: 1.6;
+}
+.history-heading {
+  margin-top: 28px;
+}
+.revision-list {
+  display: grid;
+  gap: 12px;
+  padding-left: 18px;
+}
+.revision-list summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+}
+.revision-list details[open] .result-body {
+  margin: 14px 0 22px;
+}
 .connection-card code,
 .setup-list code {
   overflow-wrap: anywhere;

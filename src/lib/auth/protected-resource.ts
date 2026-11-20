@@ -21,7 +21,8 @@ export function protectedResourceMetadataResponse(path: string[] = []): Response
     return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
   const scopes = (
-    process.env.PERMINISTER_MCP_SCOPES || "brain:read policy:read result:save knowledge:propose"
+    process.env.PERMINISTER_MCP_SCOPES ||
+    "brain:read brain:feedback policy:read result:save knowledge:propose"
   )
     .split(/\s+/)
     .filter(Boolean);

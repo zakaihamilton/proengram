@@ -34,7 +34,7 @@ export default async function KnowledgePage({
       <PageHeader
         eyebrow="LIBRARY"
         title="Knowledge"
-        description="Search approved Markdown, saved answers, and imported policy snapshots."
+        description="Search company documents, decisions, project history, saved answers, and imported policy snapshots."
         actions={
           <Link className="pf-button pf-button-secondary" href="/saved/new">
             Save an answer
@@ -81,7 +81,7 @@ export default async function KnowledgePage({
           description={
             query
               ? "Try another phrase or broaden the search."
-              : "Sync company Markdown or save a useful answer to start the library."
+              : "Connect a company source or save a useful answer to start the library."
           }
           action={
             !query ? (

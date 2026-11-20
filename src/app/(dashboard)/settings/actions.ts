@@ -1,18 +1,25 @@
 "use server";
 
-import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { authorizeAppAction, getDashboardIdentity } from "@/lib/auth/session";
+import { removeGitHubAccountConnection } from "@/lib/github/connections";
 import {
   addGitHubRepositorySource,
   ensureGitHubRepositoryWebhook,
   removeGitHubRepositorySource,
   syncGitHubMarkdown,
 } from "@/lib/github/github";
-import { removeGitHubAccountConnection } from "@/lib/github/connections";
 import { enqueueGitHubSyncJob } from "@/lib/github/sync-jobs";
 import { processGitHubSyncJob } from "@/lib/github/sync-worker";
+import {
+  addGoogleDriveSource,
+  disconnectGoogleDriveAccount,
+  enqueueGoogleDriveSyncJob,
+  removeGoogleDriveSource,
+} from "@/lib/google-drive/connections";
+import { processGoogleDriveSyncJob } from "@/lib/google-drive/sync-worker";
 
 async function requireActionIdentity(action: string) {
   const identity = await getDashboardIdentity();
@@ -128,7 +135,88 @@ export async function syncGitHubAction(formData: FormData): Promise<void> {
   redirect(`/settings?github=synced&count=${itemCount}`);
 }
 
+export async function addGoogleDriveSourceAction(formData: FormData): Promise<void> {
+  const identity = await requireActionIdentity("source:manage");
+  const scope = String(formData.get("scope") ?? "folders");
+  const selectedFolderIds = scope === "drive" ? [] : formData.getAll("folderId").map(String);
+  if (scope !== "drive" && selectedFolderIds.length === 0) {
+    redirect("/settings?googleDriveSource=emptyScope");
+  }
+  let sourceId: string;
+  try {
+    sourceId = await addGoogleDriveSource({
+      organizationId: identity.organization.organizationId,
+      subjectId: identity.subjectId,
+      driveId: String(formData.get("driveId") ?? ""),
+      folderIds: selectedFolderIds,
+    });
+    const job = await enqueueGoogleDriveSyncJob({
+      organizationId: identity.organization.organizationId,
+      sourceId,
+      actorSubjectId: identity.subjectId,
+      trigger: "initial",
+    });
+    after(() => processGoogleDriveSyncJob(job.jobId).catch(() => false));
+  } catch {
+    redirect("/settings?googleDriveSource=error");
+  }
+  revalidateGoogleDrivePages();
+  redirect("/settings?googleDriveSource=saved");
+}
+
+export async function syncGoogleDriveAction(formData: FormData): Promise<void> {
+  const identity = await requireActionIdentity("source:sync");
+  try {
+    const job = await enqueueGoogleDriveSyncJob({
+      organizationId: identity.organization.organizationId,
+      sourceId: String(formData.get("sourceId") ?? ""),
+      actorSubjectId: identity.subjectId,
+      trigger: "poll",
+    });
+    after(() => processGoogleDriveSyncJob(job.jobId).catch(() => false));
+  } catch {
+    redirect("/settings?googleDriveSource=error");
+  }
+  revalidateGoogleDrivePages();
+  redirect("/settings?googleDriveSource=queued");
+}
+
+export async function removeGoogleDriveSourceAction(formData: FormData): Promise<void> {
+  const identity = await requireActionIdentity("source:manage");
+  try {
+    await removeGoogleDriveSource({
+      organizationId: identity.organization.organizationId,
+      subjectId: identity.subjectId,
+      sourceId: String(formData.get("sourceId") ?? ""),
+    });
+  } catch {
+    redirect("/settings?googleDriveSource=error");
+  }
+  revalidateGoogleDrivePages();
+  redirect("/settings?googleDriveSource=removed");
+}
+
+export async function disconnectGoogleDriveAction(): Promise<void> {
+  const identity = await requireActionIdentity("source:manage");
+  try {
+    await disconnectGoogleDriveAccount({
+      organizationId: identity.organization.organizationId,
+      subjectId: identity.subjectId,
+    });
+  } catch {
+    redirect("/settings?googleDriveConnection=error");
+  }
+  revalidateGoogleDrivePages();
+  redirect("/settings?googleDriveConnection=disconnected");
+}
+
 function revalidateGitHubPages(): void {
+  revalidatePath("/settings");
+  revalidatePath("/overview");
+  revalidatePath("/knowledge");
+}
+
+function revalidateGoogleDrivePages(): void {
   revalidatePath("/settings");
   revalidatePath("/overview");
   revalidatePath("/knowledge");

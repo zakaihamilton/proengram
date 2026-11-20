@@ -2,8 +2,8 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { getPublicOrigin } from "@/lib/auth/config";
+import { replaceBrainChunks, writeActivity, writeItemVersion } from "@/lib/db/brain";
 import { getPool } from "@/lib/db/pool";
-import { writeActivity } from "@/lib/db/brain";
 import { getGitHubAccessToken, isGitHubConfigured } from "./connections";
 import { decryptGitHubToken, encryptGitHubToken } from "./token-crypto";
 import { createGitHubRepositoryWebhook, deleteGitHubRepositoryWebhook } from "./webhook-api";
@@ -931,7 +931,7 @@ export async function syncGitHubMarkdown(
           document.markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() ||
           document.path.split("/").at(-1) ||
           document.path;
-        await client.query(
+        const stored = await client.query<{ id: string }>(
           `INSERT INTO brain_items
             (id, organization_id, source_id, kind, external_key, title, markdown, source_url, source_revision, sync_batch_id, is_active)
            VALUES ($1, $2, $3, 'github_markdown', $4, $5, $6, $7, $8, $9, true)
@@ -944,7 +944,8 @@ export async function syncGitHubMarkdown(
              source_revision = EXCLUDED.source_revision,
              sync_batch_id = EXCLUDED.sync_batch_id,
              is_active = true,
-             updated_at = now()`,
+             updated_at = now()
+           RETURNING id`,
           [
             randomUUID(),
             organizationId,
@@ -957,6 +958,20 @@ export async function syncGitHubMarkdown(
             batchId,
           ],
         );
+        const itemId = stored.rows[0]?.id;
+        if (!itemId) throw new Error("A synced GitHub document could not be retrieved.");
+        await writeItemVersion(client, {
+          organizationId,
+          itemId,
+          markdown: document.markdown,
+          sourceRevision: document.sha,
+        });
+        await replaceBrainChunks(client, {
+          organizationId,
+          itemId,
+          markdown: document.markdown,
+          title: title.slice(0, 240),
+        });
       }
       await writeActivity(client, {
         id: randomUUID(),
