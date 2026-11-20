@@ -173,8 +173,10 @@ async function searchItems(
   if (selectedKind) where.push(`item.kind = ${bind(selectedKind)}`);
   if (excludeKind) where.push(`item.kind <> ${bind(excludeKind)}`);
   if (filters.sourceId) where.push(`item.source_id = ${bind(filters.sourceId)}::uuid`);
-  if (filters.projectName)
-    where.push(`lower(item.project_name) = lower(${bind(filters.projectName)})`);
+  if (filters.projectName) {
+    const projectField = filters.includeHistory ? "version.project_name" : "item.project_name";
+    where.push(`lower(${projectField}) = lower(${bind(filters.projectName)})`);
+  }
   if (filters.ownerSubjectId) where.push(`item.owner_subject_id = ${bind(filters.ownerSubjectId)}`);
   if (filters.dateFrom) {
     where.push(
@@ -190,23 +192,48 @@ async function searchItems(
 
   if (!normalizedQuery) {
     const limitParameter = bind(limit);
+    const versionFields = new Set([
+      "title",
+      "markdown",
+      "source_revision",
+      "source_modified_at",
+      "occurred_at",
+      "project_name",
+      "citations",
+    ]);
+    const itemFields = ITEM_FIELDS.split(", ")
+      .map((field) => {
+        if (filters.includeHistory && versionFields.has(field))
+          return `version.${field} AS ${field}`;
+        if (filters.includeHistory && field === "updated_at") {
+          return "version.observed_at AS updated_at";
+        }
+        return `item.${field}`;
+      })
+      .join(", ");
+    const versionJoin = filters.includeHistory
+      ? `JOIN brain_item_versions AS version
+           ON version.item_id = item.id AND version.organization_id = item.organization_id`
+      : `LEFT JOIN brain_item_versions AS version
+           ON version.id = item.current_version_id AND version.organization_id = item.organization_id`;
+    const versionOrder = filters.includeHistory
+      ? "coalesce(version.occurred_at, version.source_modified_at, version.observed_at)"
+      : "coalesce(item.occurred_at, item.source_modified_at, item.updated_at)";
     const result = await pool.query(
-      `SELECT ${ITEM_FIELDS.split(", ")
-        .map((field) => `item.${field}`)
-        .join(", ")},
+      `SELECT ${itemFields},
               NULL::text AS match_excerpt, NULL::text AS match_locator,
               version.id AS match_version_id, version.observed_at AS match_version_observed_at,
-              version.source_revision AS match_source_revision, false AS is_historical_match
+              version.source_revision AS match_source_revision,
+              ${filters.includeHistory ? "(version.id <> item.current_version_id)" : "false"} AS is_historical_match
          FROM brain_items AS item
-         LEFT JOIN brain_item_versions AS version
-           ON version.id = item.current_version_id AND version.organization_id = item.organization_id
+         ${versionJoin}
          LEFT JOIN LATERAL (
            SELECT sync.status FROM source_syncs AS sync
             WHERE sync.organization_id = item.organization_id AND sync.source_id = item.source_id
             ORDER BY sync.started_at DESC LIMIT 1
          ) AS source_sync ON true
         WHERE ${where.join(" AND ")}
-        ORDER BY ${sortBy === "oldest" ? "coalesce(item.occurred_at, item.source_modified_at, item.updated_at) ASC" : "coalesce(item.occurred_at, item.source_modified_at, item.updated_at) DESC"}, item.updated_at DESC
+        ORDER BY ${versionOrder} ${sortBy === "oldest" ? "ASC" : "DESC"}, item.updated_at DESC
         LIMIT ${limitParameter}`,
       values,
     );
@@ -226,8 +253,10 @@ async function searchItems(
       : sortBy === "oldest"
         ? "coalesce(best.version_occurred_at, best.version_source_modified_at, best.version_observed_at) ASC, best.fused_score DESC"
         : "best.fused_score DESC, coalesce(best.version_occurred_at, best.version_source_modified_at, best.version_observed_at) DESC";
-  const result = await pool.query(
-    `WITH candidates AS (
+  const result = await withDatabaseTransaction(async (client) => {
+    if (queryVector) await client.query("SET LOCAL hnsw.ef_search = 1000");
+    return client.query(
+      `WITH filtered_versions AS (
        SELECT item.id AS item_id, item.organization_id, item.source_id, item.kind,
               item.title, item.markdown, item.source_url, item.source_revision,
               item.source_modified_at, item.owner_subject_id, item.updated_at,
@@ -236,28 +265,54 @@ async function searchItems(
               version.source_revision AS version_source_revision,
               version.source_modified_at AS version_source_modified_at,
               version.observed_at AS version_observed_at,
-              version.occurred_at AS version_occurred_at,
-              chunk.ordinal, chunk.content, chunk.locator,
-              greatest(
-                ts_rank_cd(chunk.search_vector_english, websearch_to_tsquery('english'::regconfig, ${queryParameter})),
-                ts_rank_cd(chunk.search_vector_simple, websearch_to_tsquery('simple'::regconfig, ${queryParameter}))
-              ) AS lexical_score,
-              CASE WHEN ${vectorParameter}::vector IS NULL OR chunk.embedding IS NULL
-                         OR chunk.embedding_model IS DISTINCT FROM ${modelParameter}
-                   THEN NULL
-                   ELSE chunk.embedding <=> ${vectorParameter}::vector END AS vector_distance
+              version.occurred_at AS version_occurred_at
          FROM brain_items AS item
          JOIN brain_item_versions AS version
            ON version.item_id = item.id AND version.organization_id = item.organization_id
-         JOIN brain_chunks AS chunk
-           ON chunk.item_id = item.id AND chunk.organization_id = item.organization_id
-          AND chunk.version_id = version.id
          LEFT JOIN LATERAL (
            SELECT sync.status FROM source_syncs AS sync
             WHERE sync.organization_id = item.organization_id AND sync.source_id = item.source_id
             ORDER BY sync.started_at DESC LIMIT 1
          ) AS source_sync ON true
         WHERE ${where.join(" AND ")} ${historyFilter}
+     ), lexical_candidates AS (
+       SELECT filtered.*, chunk.ordinal, chunk.content, chunk.locator,
+              greatest(
+                ts_rank_cd(chunk.search_vector_english, websearch_to_tsquery('english'::regconfig, ${queryParameter})),
+                ts_rank_cd(chunk.search_vector_simple, websearch_to_tsquery('simple'::regconfig, ${queryParameter}))
+              ) AS lexical_score,
+              NULL::double precision AS vector_distance
+         FROM filtered_versions AS filtered
+         JOIN brain_chunks AS chunk
+           ON chunk.item_id = filtered.item_id
+          AND chunk.organization_id = filtered.organization_id
+          AND chunk.version_id = filtered.version_id
+        WHERE chunk.search_vector_english @@ websearch_to_tsquery('english'::regconfig, ${queryParameter})
+           OR chunk.search_vector_simple @@ websearch_to_tsquery('simple'::regconfig, ${queryParameter})
+     ), semantic_neighbors AS MATERIALIZED (
+       SELECT chunk.id AS chunk_id,
+              chunk.embedding <=> ${vectorParameter}::vector AS vector_distance
+         FROM brain_chunks AS chunk
+        WHERE chunk.organization_id = $1
+          AND chunk.embedding_model = ${modelParameter}
+          AND chunk.embedding IS NOT NULL
+          AND ${vectorParameter}::vector IS NOT NULL
+          AND chunk.version_id IN (SELECT version_id FROM filtered_versions)
+        ORDER BY chunk.embedding <=> ${vectorParameter}::vector
+        LIMIT 1000
+     ), semantic_candidates AS (
+       SELECT filtered.*, chunk.ordinal, chunk.content, chunk.locator,
+              0::double precision AS lexical_score, neighbor.vector_distance
+         FROM semantic_neighbors AS neighbor
+         JOIN brain_chunks AS chunk ON chunk.id = neighbor.chunk_id
+         JOIN filtered_versions AS filtered
+           ON filtered.item_id = chunk.item_id
+          AND filtered.organization_id = chunk.organization_id
+          AND filtered.version_id = chunk.version_id
+     ), candidates AS (
+       SELECT * FROM lexical_candidates
+       UNION ALL
+       SELECT * FROM semantic_candidates
      ), lexical_best AS (
        SELECT DISTINCT ON (item_id, version_id) item_id, version_id, lexical_score,
               ordinal, content, locator
@@ -297,20 +352,20 @@ async function searchItems(
         ORDER BY item_id, version_id, lexical_score DESC,
                  vector_distance ASC NULLS LAST, ordinal
      ), version_matches AS (
-       SELECT candidates.item_id, candidates.organization_id, candidates.version_id,
-              candidates.version_source_revision, candidates.version_source_modified_at,
-              candidates.version_observed_at, candidates.version_occurred_at,
+       SELECT filtered.item_id, filtered.organization_id, filtered.version_id,
+              filtered.version_source_revision, filtered.version_source_modified_at,
+              filtered.version_observed_at, filtered.version_occurred_at,
               fused.fused_score, matching_chunk.match_excerpt, matching_chunk.match_locator,
               row_number() OVER (
-                PARTITION BY candidates.item_id
+                PARTITION BY filtered.item_id
                 ORDER BY fused.fused_score DESC,
-                         coalesce(candidates.version_occurred_at, candidates.version_source_modified_at, candidates.version_observed_at) DESC,
-                         candidates.version_id
+                         coalesce(filtered.version_occurred_at, filtered.version_source_modified_at, filtered.version_observed_at) DESC,
+                         filtered.version_id
               ) AS revision_rank
-         FROM candidates
-         JOIN fused ON fused.item_id = candidates.item_id AND fused.version_id = candidates.version_id
-         JOIN matching_chunk ON matching_chunk.item_id = candidates.item_id
-                            AND matching_chunk.version_id = candidates.version_id
+         FROM filtered_versions AS filtered
+         JOIN fused ON fused.item_id = filtered.item_id AND fused.version_id = filtered.version_id
+         JOIN matching_chunk ON matching_chunk.item_id = filtered.item_id
+                            AND matching_chunk.version_id = filtered.version_id
      ), best AS (
        SELECT DISTINCT ON (matches.item_id)
               matches.item_id, matches.version_id, matches.version_source_revision,
@@ -332,8 +387,9 @@ async function searchItems(
        JOIN brain_items AS item ON item.id = best.item_id AND item.organization_id = $1
       ORDER BY ${relevanceSort}
       LIMIT ${limitParameter}`,
-    values,
-  );
+      values,
+    );
+  }, pool);
   return result.rows.map(mapItem);
 }
 
