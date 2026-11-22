@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Alert, Badge, Card, PageHeader } from "panel-frame-ui";
-import { MarkdownContent } from "@/components/markdown-content";
 import {
   editKnowledgeItemAction,
   suggestKnowledgeEditAction,
 } from "@/app/(dashboard)/knowledge/actions";
+import { MarkdownContent } from "@/components/markdown-content";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
 import { formatDate } from "@/lib/date";
 import { getBrainItem, getBrainItemHistory, getBrainItemVersion } from "@/lib/db/brain";

@@ -1,8 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AuthCard, AuthShell, ThemeControl } from "panel-frame-ui";
 import { BrandMark } from "@/components/brand";
 import { getDashboardIdentity } from "@/lib/auth/session";
-import { redirect } from "next/navigation";
 
 const errorCopy: Record<string, string> = {
   configuration: "ProEngram sign-in is not configured for this deployment.",

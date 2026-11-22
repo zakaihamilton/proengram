@@ -1,12 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getPublicOrigin, isCookieSecure } from "@/lib/auth/config";
+import { decodeOAuthState } from "@/lib/auth/oauth-state";
 import {
   exchangeDashboardCode,
   getOpenIdConfiguration,
   validateDashboardIdToken,
 } from "@/lib/auth/perminister";
-import { decodeOAuthState } from "@/lib/auth/oauth-state";
 import { getDashboardIdentityForAccessToken, SESSION_COOKIE } from "@/lib/auth/session";
 
 export const runtime = "nodejs";

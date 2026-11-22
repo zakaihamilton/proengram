@@ -1,7 +1,7 @@
 import "server-only";
 
-import { env, pipeline, type FeatureExtractionPipelineType } from "@huggingface/transformers";
 import { resolve } from "node:path";
+import { env, type FeatureExtractionPipelineType, pipeline } from "@huggingface/transformers";
 
 const EMBEDDING_DIMENSIONS = 384;
 const EMBEDDING_MODEL_ID = "onnx-community/paraphrase-multilingual-MiniLM-L12-v2-ONNX";

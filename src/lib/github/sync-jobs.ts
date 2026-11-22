@@ -1,8 +1,8 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { withDatabaseTransaction } from "@/lib/db/transaction";
 import { getPool } from "@/lib/db/pool";
+import { withDatabaseTransaction } from "@/lib/db/transaction";
 
 export type GitHubSyncTrigger = "initial" | "webhook" | "reconcile";
 

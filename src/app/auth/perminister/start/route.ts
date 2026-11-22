@@ -1,8 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getDashboardRedirectUri, getOpenIdConfiguration } from "@/lib/auth/perminister";
 import { getPerministerClient, getPublicOrigin, isCookieSecure } from "@/lib/auth/config";
-import { createRandomToken, createPkceChallenge, encodeOAuthState } from "@/lib/auth/oauth-state";
+import { createPkceChallenge, createRandomToken, encodeOAuthState } from "@/lib/auth/oauth-state";
+import { getDashboardRedirectUri, getOpenIdConfiguration } from "@/lib/auth/perminister";
 
 export const runtime = "nodejs";
 

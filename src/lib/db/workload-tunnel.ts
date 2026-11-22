@@ -1,5 +1,5 @@
 import net, { type AddressInfo, type Server } from "node:net";
-import ssh2, { Client as SshClient, type ClientChannel } from "ssh2";
+import ssh2, { type ClientChannel, Client as SshClient } from "ssh2";
 import WebSocket, { createWebSocketStream } from "ws";
 
 type WorkloadCredential = {

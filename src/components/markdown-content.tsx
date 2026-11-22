@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { parseMarkdown, type InlineToken, type MarkdownBlock } from "@/lib/markdown";
+import { type InlineToken, type MarkdownBlock, parseMarkdown } from "@/lib/markdown";
 
 function renderToken(token: InlineToken): ReactNode {
   if (token.kind === "text") return token.value;

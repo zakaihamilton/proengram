@@ -1,9 +1,9 @@
 import { after } from "next/server";
+import { getPool } from "@/lib/db/pool";
+import { type GitHubWebhookSource, listGitHubWebhookSources } from "@/lib/github/github";
 import { enqueueGitHubSyncJob } from "@/lib/github/sync-jobs";
-import { listGitHubWebhookSources, type GitHubWebhookSource } from "@/lib/github/github";
 import { processGitHubSyncJob } from "@/lib/github/sync-worker";
 import { verifyGitHubWebhookSignature } from "@/lib/github/webhook-api";
-import { getPool } from "@/lib/db/pool";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

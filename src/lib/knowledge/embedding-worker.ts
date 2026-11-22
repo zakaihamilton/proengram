@@ -1,9 +1,9 @@
 import "server-only";
 
+import { getPool } from "@/lib/db/pool";
 import { withDatabaseTransaction } from "@/lib/db/transaction";
 import { buildSearchableChunks } from "@/lib/knowledge/chunk";
-import { embedTexts, EMBEDDING_MODEL_VERSION } from "@/lib/knowledge/embeddings";
-import { getPool } from "@/lib/db/pool";
+import { EMBEDDING_MODEL_VERSION, embedTexts } from "@/lib/knowledge/embeddings";
 
 type EmbeddingJob = {
   id: string;

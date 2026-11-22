@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Alert, Badge, Card, EmptyState, PageHeader } from "panel-frame-ui";
 import { reviewKnowledgeSuggestionAction } from "@/app/(dashboard)/knowledge/actions";
+import { MarkdownContent } from "@/components/markdown-content";
 import { requireDashboardIdentity } from "@/lib/auth/session";
 import { formatDate } from "@/lib/date";
 import { listPendingKnowledgeSuggestions } from "@/lib/db/brain";
-import { MarkdownContent } from "@/components/markdown-content";
 import { isDatabaseConfigured } from "@/lib/db/pool";
 
 const kindLabels = {

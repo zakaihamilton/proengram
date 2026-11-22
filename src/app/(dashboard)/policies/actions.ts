@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authorizeAppAction, getDashboardIdentity } from "@/lib/auth/session";
-import { getPool } from "@/lib/db/pool";
 import { replaceBrainChunks, writeActivity, writeItemVersion } from "@/lib/db/brain";
+import { getPool } from "@/lib/db/pool";
 
 type CatalogRule = { ruleId: string; label: string; description?: string; category?: string };
 
