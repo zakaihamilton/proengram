@@ -12,7 +12,7 @@ import {
   listGoogleSharedDrives,
 } from "./drive-api";
 
-export type GoogleDriveSource = {
+type GoogleDriveSource = {
   id: string;
   driveId: string;
   driveName: string;

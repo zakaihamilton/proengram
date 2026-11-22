@@ -32,7 +32,7 @@ type GoogleDriveAccountRow = {
   created_at: Date | string;
 };
 
-export type GoogleDriveAccountConnection = {
+type GoogleDriveAccountConnection = {
   email: string;
   status: "active" | "reauthorize_required";
   createdAt: string;

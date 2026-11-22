@@ -23,7 +23,7 @@ export function textResult(value: unknown, isError = false) {
   };
 }
 
-export function errorText(error: unknown): string {
+function errorText(error: unknown): string {
   return error instanceof Error
     ? error.message.slice(0, 400)
     : "The requested ProEngram operation failed.";
@@ -37,7 +37,7 @@ export async function withToolErrors<T>(operation: () => Promise<T>) {
   }
 }
 
-export async function canAuthorizeMcpAction(
+async function canAuthorizeMcpAction(
   principal: McpPrincipal,
   action: string,
   organizationId: string,

@@ -8,7 +8,7 @@ import { apiPath, GITHUB_API_ROOT, githubJson } from "./api-client";
 import { getGitHubAccessToken, isGitHubConfigured } from "./connections";
 import { deleteGitHubRepositoryWebhook } from "./webhook-api";
 
-export type GitHubAccessibleRepository = {
+type GitHubAccessibleRepository = {
   id: string;
   fullName: string;
   defaultBranch: string;
@@ -36,7 +36,7 @@ export type GitHubRepositorySourceRow = {
   last_synced_at: Date | string | null;
 };
 
-export type GitHubRepositorySource = {
+type GitHubRepositorySource = {
   id: string;
   organizationAccountId: string | null;
   githubLogin: string | null;

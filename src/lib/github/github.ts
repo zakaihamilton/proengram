@@ -2,8 +2,6 @@ export { isGitHubConfigured } from "./connections";
 export { createMarkdownPullRequest } from "./proposals";
 export {
   addGitHubRepositorySource,
-  type GitHubAccessibleRepository,
-  type GitHubRepositorySource,
   listGitHubAccountRepositories,
   listGitHubRepositorySources,
   removeGitHubRepositorySource,

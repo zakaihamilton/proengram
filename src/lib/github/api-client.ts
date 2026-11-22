@@ -1,7 +1,7 @@
 import "server-only";
 
 export const GITHUB_API_ROOT = "https://api.github.com";
-export const GITHUB_API_VERSION = "2022-11-28";
+const GITHUB_API_VERSION = "2022-11-28";
 export const MAX_MARKDOWN_BYTES = 300_000;
 
 export function githubHeaders(token: string): HeadersInit {

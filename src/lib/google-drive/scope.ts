@@ -2,7 +2,7 @@ import "server-only";
 
 import { type GoogleDriveFile, type GoogleDriveFolder, listGoogleDriveFiles } from "./drive-api";
 
-export const MAX_DRIVE_FILES = 5000;
+const MAX_DRIVE_FILES = 5000;
 
 export function sameFolderSelection(left: string[], right: unknown): boolean {
   if (!Array.isArray(right) || right.some((value) => typeof value !== "string")) return false;
@@ -47,7 +47,7 @@ export function fileIsSelected(
   );
 }
 
-export function selectedDriveFiles(
+function selectedDriveFiles(
   files: GoogleDriveFile[],
   selectedFolderIds: string[],
 ): GoogleDriveFile[] {

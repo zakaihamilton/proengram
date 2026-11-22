@@ -30,7 +30,7 @@ export class GoogleDriveSyncContextChangedError extends Error {
   }
 }
 
-export function sourceRevision(file: GoogleDriveFile, markdown: string): string {
+function sourceRevision(file: GoogleDriveFile, markdown: string): string {
   return (
     file.headRevisionId || file.modifiedTime || createHash("sha256").update(markdown).digest("hex")
   );

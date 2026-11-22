@@ -13,11 +13,8 @@ export {
 export type {
   BrainItem,
   BrainItemKind,
-  BrainItemVersion,
   BrainSearchFilters,
-  KnowledgeFeedback,
   KnowledgeFeedbackRating,
-  KnowledgeSuggestion,
 } from "./brain-types";
 export {
   listPendingKnowledgeSuggestions,

@@ -1,14 +1,12 @@
 export {
   connectGoogleDriveAccount,
   disconnectGoogleDriveAccount,
-  type GoogleDriveAccountConnection,
   getGoogleDriveAccessToken,
   getGoogleDriveAccountConnection,
   isGoogleDriveConfigured,
 } from "./accounts";
 export {
   addGoogleDriveSource,
-  type GoogleDriveSource,
   type GoogleDriveSourceSyncConfig,
   getGoogleDriveSourceSyncConfig,
   listAvailableGoogleSharedDrives,
