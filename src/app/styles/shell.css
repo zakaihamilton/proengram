@@ -1,0 +1,228 @@
+.brand-mark {
+  display: inline-flex;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.brand-mark-small {
+  width: 22px;
+  height: 22px;
+}
+.proengram-brand {
+  gap: 10px;
+  color: var(--ink);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+.workspace-context {
+  display: grid;
+  gap: 4px;
+  padding: 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.workspace-context-label,
+.eyebrow,
+.section-kicker {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.workspace-context-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-context-form {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.workspace-context-switcher {
+  width: 100%;
+}
+.sidebar-footnote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.sidebar-footnote-dot,
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent);
+}
+.nav-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+.app-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.toolbar-auth-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.toolbar-user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.user-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-strong);
+  background: var(--surface-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.toolbar-user-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.toolbar-user-copy strong {
+  max-width: 160px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar-user-copy small {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar-signout {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+.toolbar-signout:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+.privacy-footer {
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.privacy-footer:hover {
+  color: var(--accent);
+}
+@media (max-width: 780px) {
+  .access-page .pf-auth-aside-footer {
+    display: block;
+    margin-top: 12px;
+  }
+}
+
+.access-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+.auth-aside {
+  max-width: 350px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.auth-aside h1 {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 38px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+}
+.login-error {
+  margin: 0 0 16px;
+  color: var(--danger);
+  font-size: 12px;
+}
+.login-retry {
+  width: 100%;
+}
+.login-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.preview-page {
+  width: min(100%, 1460px);
+  margin: 0 auto;
+  padding: 22px;
+}
+.preview-content {
+  padding: 22px;
+}
+.preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+.preview-panel {
+  margin-top: 22px;
+}
+.preview-state-note {
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .app-toolbar {
+    gap: 8px;
+  }
+  .toolbar-auth-status,
+  .toolbar-user-copy,
+  .toolbar-signout {
+    display: none;
+  }
+  .preview-page {
+    padding: 12px;
+  }
+  .preview-content {
+    padding: 14px;
+  }
+}

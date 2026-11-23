@@ -4,22 +4,23 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { writeActivity } from "@/lib/db/brain";
 import { getPool } from "@/lib/db/pool";
+import { withDatabaseTransaction } from "@/lib/db/transaction";
 import {
+  type GitHubAccountProfile,
   GitHubOAuthError,
+  type GitHubUserToken,
   getGitHubOAuthConfiguration,
   refreshGitHubUserToken,
-  revokeGitHubAuthorization,
-  type GitHubAccountProfile,
-  type GitHubUserToken,
 } from "./oauth";
 import {
   decryptGitHubToken,
   encryptGitHubToken,
   isGitHubTokenEncryptionConfigured,
 } from "./token-crypto";
-import { deleteGitHubRepositoryWebhook } from "./webhook-api";
 
-type GitHubOAuthAccountRow = {
+export { removeGitHubAccountConnection } from "./account-removal";
+
+export type GitHubOAuthAccountRow = {
   id: string;
   github_user_id: string;
   github_login: string;
@@ -88,7 +89,7 @@ async function markAccountReauthorizationRequired(
   );
 }
 
-async function getFreshAccessToken(
+export async function getFreshAccessToken(
   client: PoolClient,
   account: GitHubOAuthAccountRow,
 ): Promise<string | null> {
@@ -139,11 +140,7 @@ export async function connectGitHubAccount(input: {
   token: GitHubUserToken;
 }): Promise<void> {
   if (!isGitHubConfigured()) throw new Error("GitHub OAuth is not configured.");
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
+  await withDatabaseTransaction(async (client) => {
     const accountResult = await client.query<{ id: string }>(
       `INSERT INTO github_oauth_accounts
         (id, github_user_id, github_login, avatar_url, access_token_ciphertext,
@@ -184,8 +181,9 @@ export async function connectGitHubAccount(input: {
       [randomUUID(), input.organizationId, accountId, input.subjectId],
     );
     const organizationAccountId = linkResult.rows[0]?.id;
-    if (!organizationAccountId)
+    if (!organizationAccountId) {
       throw new Error("GitHub account could not be connected to this workspace.");
+    }
 
     await client.query(
       `UPDATE github_repository_sources
@@ -207,13 +205,7 @@ export async function connectGitHubAccount(input: {
       summary: `Connected GitHub account @${input.profile.login}.`,
       metadata: { githubLogin: input.profile.login },
     });
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function listGitHubAccountConnections(
@@ -253,13 +245,7 @@ export async function getGitHubAccessToken(
   organizationId: string,
   organizationAccountId: string,
 ): Promise<string> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  let accessToken: string | null = null;
-  let needsReauthorization = false;
-  try {
-    await client.query("BEGIN");
+  const accessToken = await withDatabaseTransaction(async (client) => {
     const result = await client.query<GitHubOAuthAccountRow>(
       `SELECT account.id,
               account.github_user_id,
@@ -278,191 +264,10 @@ export async function getGitHubAccessToken(
     );
     const account = result.rows[0];
     if (!account) throw new Error("Connect a GitHub account for this organization first.");
-    accessToken = await getFreshAccessToken(client, account);
-    needsReauthorization = accessToken === null;
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
-  if (needsReauthorization || !accessToken) {
+    return getFreshAccessToken(client, account);
+  });
+  if (!accessToken) {
     throw new Error("Reconnect this GitHub account in Settings to continue.");
   }
   return accessToken;
-}
-
-export async function removeGitHubAccountConnection(input: {
-  organizationId: string;
-  subjectId: string;
-  organizationAccountId: string;
-}): Promise<boolean> {
-  const pool = await getPool();
-  if (!pool) throw new Error("Nanogres PostgreSQL is not configured.");
-  const client = await pool.connect();
-  let removed = false;
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<GitHubOAuthAccountRow & { organization_account_id: string }>(
-      `SELECT link.id AS organization_account_id,
-              account.id,
-              account.github_user_id,
-              account.github_login,
-              account.avatar_url,
-              account.access_token_ciphertext,
-              account.refresh_token_ciphertext,
-              account.access_token_expires_at,
-              account.refresh_token_expires_at,
-              account.status
-         FROM github_organization_accounts AS link
-         JOIN github_oauth_accounts AS account ON account.id = link.github_oauth_account_id
-        WHERE link.id = $1 AND link.organization_id = $2
-        FOR UPDATE OF link, account`,
-      [input.organizationAccountId, input.organizationId],
-    );
-    const account = result.rows[0];
-    if (!account) {
-      await client.query("ROLLBACK");
-      return false;
-    }
-    const linkCountResult = await client.query<{ count: number }>(
-      `SELECT count(*)::integer AS count
-         FROM github_organization_accounts
-        WHERE github_oauth_account_id = $1`,
-      [account.id],
-    );
-    const isLastLink = Number(linkCountResult.rows[0]?.count ?? 0) <= 1;
-
-    let accessToken: string | null = null;
-    try {
-      accessToken = await getFreshAccessToken(client, account);
-    } catch {
-      console.error("GitHub account token refresh failed during account removal.");
-    }
-    const sourcesWithHooks = await client.query<{
-      id: string;
-      github_repository_id: string | null;
-      repository_owner: string;
-      repository_name: string;
-      github_webhook_id: string;
-    }>(
-      `SELECT id, github_repository_id, repository_owner, repository_name, github_webhook_id
-         FROM github_repository_sources
-        WHERE organization_id = $1
-          AND organization_account_id = $2
-          AND status = 'active'
-          AND github_webhook_id IS NOT NULL`,
-      [input.organizationId, input.organizationAccountId],
-    );
-    const hooksRemovedSourceIds: string[] = [];
-    if (accessToken) {
-      for (const source of sourcesWithHooks.rows) {
-        const sharedHook = await client.query(
-          `SELECT 1 FROM github_repository_sources
-            WHERE github_webhook_id = $1
-              AND id <> $2
-              AND status = 'active'
-            LIMIT 1`,
-          [source.github_webhook_id, source.id],
-        );
-        if ((sharedHook.rowCount ?? 0) > 0) {
-          hooksRemovedSourceIds.push(String(source.id));
-          continue;
-        }
-        try {
-          await deleteGitHubRepositoryWebhook({
-            token: accessToken,
-            owner: source.repository_owner,
-            repository: source.repository_name,
-            webhookId: source.github_webhook_id,
-          });
-          hooksRemovedSourceIds.push(String(source.id));
-        } catch {
-          console.error("GitHub repository webhook cleanup failed during account removal.");
-        }
-      }
-    }
-    if (isLastLink && accessToken) {
-      try {
-        await revokeGitHubAuthorization(accessToken);
-      } catch {
-        console.error("GitHub authorization revocation failed during account removal.");
-      }
-    }
-
-    await client.query(
-      `UPDATE brain_items
-          SET is_active = false, updated_at = now()
-        WHERE organization_id = $1
-          AND kind = 'github_markdown'
-          AND source_id IN (
-            SELECT id FROM github_repository_sources WHERE organization_account_id = $2
-          )`,
-      [input.organizationId, input.organizationAccountId],
-    );
-    await client.query(
-      `UPDATE github_sync_jobs
-          SET status = 'cancelled',
-              locked_until = NULL,
-              last_error = 'The GitHub account was disconnected.',
-              completed_at = now(),
-              updated_at = now()
-        WHERE organization_id = $1
-          AND source_id IN (
-            SELECT id FROM github_repository_sources WHERE organization_account_id = $2
-          )
-          AND status IN ('pending', 'running')`,
-      [input.organizationId, input.organizationAccountId],
-    );
-    await client.query(
-      `UPDATE github_repository_sources
-          SET organization_account_id = NULL,
-              status = 'needs_auth',
-              github_webhook_id = CASE
-                WHEN id = ANY($3::uuid[]) THEN NULL
-                ELSE github_webhook_id
-              END,
-              github_webhook_secret_ciphertext = CASE
-                WHEN id = ANY($3::uuid[]) THEN NULL
-                ELSE github_webhook_secret_ciphertext
-              END,
-              github_webhook_status = CASE
-                WHEN id = ANY($3::uuid[]) THEN 'disabled'
-                ELSE github_webhook_status
-              END,
-              github_webhook_last_error = CASE
-                WHEN id = ANY($3::uuid[]) THEN NULL
-                ELSE github_webhook_last_error
-              END,
-              updated_at = now()
-        WHERE organization_id = $1 AND organization_account_id = $2`,
-      [input.organizationId, input.organizationAccountId, hooksRemovedSourceIds],
-    );
-    await client.query(
-      `DELETE FROM github_organization_accounts WHERE id = $1 AND organization_id = $2`,
-      [input.organizationAccountId, input.organizationId],
-    );
-    if (isLastLink) {
-      await client.query(`DELETE FROM github_oauth_accounts WHERE id = $1`, [account.id]);
-    }
-    await writeActivity(client, {
-      id: randomUUID(),
-      organizationId: input.organizationId,
-      actorSubjectId: input.subjectId,
-      action: "source:manage",
-      itemKind: "github_account",
-      itemId: input.organizationAccountId,
-      summary: `Disconnected GitHub account @${account.github_login}.`,
-      metadata: { githubLogin: account.github_login },
-    });
-    await client.query("COMMIT");
-    removed = true;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
-  return removed;
 }

@@ -1,8 +1,8 @@
 import {
   getOAuthStateCookieName,
+  type OAuthStatePayload,
   signOAuthState,
   verifyOAuthState,
-  type OAuthStatePayload,
 } from "@/lib/auth/oauth-provider-state";
 
 const PROVIDER = "github";

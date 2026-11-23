@@ -1,8 +1,8 @@
 import { Alert, EmptyState, PageHeader } from "panel-frame-ui";
 import { requireDashboardIdentity } from "@/lib/auth/session";
+import { formatDate } from "@/lib/date";
 import { listActivity } from "@/lib/db/brain";
 import { isDatabaseConfigured } from "@/lib/db/pool";
-import { formatDate } from "@/lib/date";
 
 export default async function ActivityPage() {
   const identity = await requireDashboardIdentity("brain:read");

@@ -3,8 +3,8 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { authorizeAppAction, getDashboardIdentity, ORGANIZATION_COOKIE } from "@/lib/auth/session";
 import { getPublicOrigin, isCookieSecure } from "@/lib/auth/config";
+import { authorizeAppAction, getDashboardIdentity, ORGANIZATION_COOKIE } from "@/lib/auth/session";
 
 type OAuthState = {
   organizationId: string;

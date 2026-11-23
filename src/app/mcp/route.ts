@@ -1,11 +1,11 @@
+import { getPublicOrigin } from "@/lib/auth/config";
 import {
   authenticateMcpRequest,
   authorizeMcpToolCalls,
-  McpAuthError,
   bearerChallenge,
+  McpAuthError,
 } from "@/lib/auth/mcp";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { getPublicOrigin } from "@/lib/auth/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -3,10 +3,10 @@ import { Alert, EmptyState, PageHeader, Select } from "panel-frame-ui";
 import { BrainItemList } from "@/components/brain-item-list";
 import { authorizeAppAction, requireDashboardIdentity } from "@/lib/auth/session";
 import {
-  listKnowledgeSearchSources,
-  searchBrainItems,
   type BrainItemKind,
   type BrainSearchFilters,
+  listKnowledgeSearchSources,
+  searchBrainItems,
 } from "@/lib/db/brain";
 import { isDatabaseConfigured } from "@/lib/db/pool";
 import { createKnowledgeSearchEmbedding } from "@/lib/knowledge/search-embedding";

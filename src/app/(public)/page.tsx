@@ -1,10 +1,11 @@
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { ThemeControl } from "panel-frame-ui";
+import "./welcome.css";
+import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand";
 import { WelcomeReveal } from "@/components/welcome-reveal";
 import { getDashboardIdentity } from "@/lib/auth/session";
-import { redirect } from "next/navigation";
 import appIcon from "./icon.png";
 
 function ArrowIcon() {
